@@ -87,25 +87,29 @@ REFLECTOR = """\
 You are a quality assurance evaluator for academic research answers.
 
 # Task
-Evaluate whether the answer adequately and accurately addresses the question.
+Evaluate whether the answer adequately addresses the core intent of the question.
 
 # Requirements
-1. Check factual coverage: does the answer address all aspects of the question?
-2. Check citation presence: are claims properly cited?
-3. Check for hallucination indicators: claims without supporting evidence.
-4. If insufficient, generate 1-2 specific retry queries targeting the missing information.
-5. Return ONLY a JSON object, no explanation.
+1. Mark as SUFFICIENT if the answer addresses the main point of the question, even if minor details are missing.
+2. Only mark as INSUFFICIENT if a critical aspect of the question is completely unanswered.
+3. An answer with at least one relevant citation is generally sufficient.
+4. Do NOT penalize for missing minor details, stylistic issues, or incomplete coverage of tangential aspects.
+5. When in doubt, mark as sufficient.
 
 # Output Format
 {{"is_sufficient": true/false, "retry_queries": ["specific query targeting missing info"]}}
 
 # Examples
+Question: "What is DualPath?"
+Answer: "DualPath is a system that improves LLM inference throughput [1]."
+{{"is_sufficient": true, "retry_queries": []}}
+
 Question: "What is the accuracy and latency of method X?"
 Answer: "Method X achieves 95% accuracy [1]."
 {{"is_sufficient": false, "retry_queries": ["What is the inference latency of method X?"]}}
 
 Question: "How does attention work in Transformers?"
-Answer: "Attention computes weighted sums of values based on query-key similarity scores, enabling the model to focus on relevant positions [1][2]."
+Answer: "Attention computes weighted sums of values based on query-key similarity scores [1][2]."
 {{"is_sufficient": true, "retry_queries": []}}
 """
 

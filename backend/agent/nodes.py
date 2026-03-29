@@ -60,10 +60,10 @@ def analyze_query(state: AgentState, llm: BaseChatModel) -> dict:
     query = state["query"]
     context_header = _build_context_header(state)
 
-    msgs = [SystemMessage(content=QUERY_ANALYZER)]
+    system_content = QUERY_ANALYZER
     if context_header:
-        msgs.append(SystemMessage(content=f"# Conversation Context\n{context_header}"))
-    msgs.append(HumanMessage(content=query))
+        system_content += f"\n\n# Conversation Context\n{context_header}"
+    msgs = [SystemMessage(content=system_content), HumanMessage(content=query)]
 
     structured_llm = llm.with_structured_output(QueryAnalysis)
     try:
@@ -96,10 +96,10 @@ def synthesize(state: AgentState, llm: BaseChatModel) -> dict:
 
     sub_context = "\n\n".join(context_parts)
 
-    msgs = [SystemMessage(content=SYNTHESIZER.format(context=sub_context))]
+    system_content = SYNTHESIZER.format(context=sub_context)
     if context_header:
-        msgs.append(SystemMessage(content=f"# Conversation Context\n{context_header}"))
-    msgs.append(HumanMessage(content=f"Original question: {query}"))
+        system_content += f"\n\n# Conversation Context\n{context_header}"
+    msgs = [SystemMessage(content=system_content), HumanMessage(content=f"Original question: {query}")]
 
     resp = llm.invoke(msgs)
 

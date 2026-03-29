@@ -38,6 +38,7 @@ class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     query: str
     summary: str
+    documents: list[str]
     sub_queries: list[str]
     sub_answers: Annotated[list[SubAnswer], merge_sub_answers]
     answer: str
