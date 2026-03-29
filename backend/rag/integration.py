@@ -123,36 +123,17 @@ class PDFParser:
         return filtered
 
     def _sort_reading_order(self, items: list[Any]) -> list[Any]:
-        """Sort items by reading order (handles single/double column)."""
-        items_with_pos = []
-        page_widths = {}
+        """Sort items by reading order using Docling's order."""
+        items_with_order = []
         
         for item in items:
-            bbox = self._extract_bbox(item)
             page_num = item.prov[0].page_no if item.prov and len(item.prov) > 0 else 0
-            
-            if bbox:
-                left, top, right, _ = bbox
-                if page_num not in page_widths:
-                    page_widths[page_num] = right
-                else:
-                    page_widths[page_num] = max(page_widths[page_num], right)
-                
-                items_with_pos.append((item, page_num, top, left, bbox))
-            else:
-                items_with_pos.append((item, page_num, 0, 0, None))
+            order = item.prov[0].charspan[0] if item.prov and len(item.prov) > 0 and hasattr(item.prov[0], 'charspan') else 0
+            items_with_order.append((item, page_num, order))
         
-        for i, (item, page_num, top, left, bbox) in enumerate(items_with_pos):
-            if bbox:
-                page_width = page_widths.get(page_num, 612.0)
-                column = 0 if left < page_width * 0.5 else 1
-                items_with_pos[i] = (item, page_num, column, top, left)
-            else:
-                items_with_pos[i] = (item, page_num, 0, top, left)
+        items_with_order.sort(key=lambda x: (x[1], x[2]))
         
-        items_with_pos.sort(key=lambda x: (x[1], x[2], x[3], x[4]))
-        
-        return [item for item, _, _, _, _ in items_with_pos]
+        return [item for item, _, _ in items_with_order]
 
     def _process_item(
         self,
