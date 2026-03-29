@@ -6,6 +6,7 @@ from langchain_milvus import Milvus, BM25BuiltInFunction
 from langchain_huggingface import HuggingFaceEmbeddings
 from pymilvus import Function, FunctionType
 from sentence_transformers import CrossEncoder
+from .cache import RetrievalCache
 
 
 class Retriever:
@@ -18,12 +19,14 @@ class Retriever:
         milvus_uri: str = "http://localhost:19530",
         collection_name: str = "papers",
         llm: Optional[object] = None,
+        enable_cache: bool = True,
     ):
         self.embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
         self.reranker = CrossEncoder(reranker_model)
         self.milvus_uri = milvus_uri
         self.collection_name = collection_name
         self.llm = llm
+        self.cache = RetrievalCache() if enable_cache else None
 
         bm25 = BM25BuiltInFunction(input_field_names="text", output_field_names="sparse")
         conn = {"uri": self.milvus_uri}
@@ -64,6 +67,11 @@ class Retriever:
             rrf_k: RRF constant for hybrid fusion.
             fetch_k: Number of candidates to fetch before reranking.
         """
+        if self.cache:
+            cached = self.cache.get(query, k, rerank, expand_parent)
+            if cached is not None:
+                return cached
+        
         search_query = self._hyde(query) if use_hyde and self.llm else query
 
         if rerank and self.reranker:
@@ -88,7 +96,13 @@ class Retriever:
             if cid not in seen:
                 seen.add(cid)
                 deduped.append(doc)
-        return deduped[:k]
+        
+        final = deduped[:k]
+        
+        if self.cache:
+            self.cache.put(query, k, rerank, expand_parent, final)
+        
+        return final
 
     def _hybrid_search(
         self, store: Milvus, query: str, k: int, rrf_k: int
