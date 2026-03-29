@@ -1,7 +1,0 @@
-**/.gitignore
-*.log
-.env
-pdf/
-**/__pycache__
-.csv
-**/db
