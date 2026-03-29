@@ -1,5 +1,11 @@
 <div align="center">
+</div>
 
+---
+<!-- TODO: replace with actual diagram -->
+<p align="center">
+  <img src="doc/logo.png" alt="logo" width="720">
+</p>
 # ScholarRAG
 
 **Multi-Agent RAG System for Academic Paper Q&A**
@@ -14,13 +20,7 @@ Upload academic papers, ask questions in natural language, get grounded answers 
 
 [Quick Start](#quick-start) | [Features](#features) | [Architecture](#architecture) | [API Reference](#api-reference) | [Demo](#demo)
 
-</div>
 
----
-<!-- TODO: replace with actual diagram -->
-<p align="center">
-  <img src="doc/logo.png" alt="logo" width="720">
-</p>
 ## What is ScholarRAG?
 
 ScholarRAG is an end-to-end academic paper Q&A system. It parses PDFs with full structural awareness (sections, tables, figures), retrieves relevant passages via hybrid search, and generates cited answers through a multi-agent pipeline -- all accessible through a clean chat interface.
