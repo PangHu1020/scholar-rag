@@ -3,3 +3,4 @@
 .env
 pdf/
 **/__pycache__
+.csv

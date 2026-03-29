@@ -28,3 +28,11 @@ class Config:
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
     LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))
     MAX_RETRIES = int(os.getenv("MAX_RETRIES", "2"))
+
+    POSTGRES_URI = os.getenv("POSTGRES_URI", "postgresql://postgres:postgres@localhost:5432/scholar_rag")
+
+    UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")
+    MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50"))
+
+    HOST = os.getenv("HOST", "0.0.0.0")
+    PORT = int(os.getenv("PORT", "8000"))
