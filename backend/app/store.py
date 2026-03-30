@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 
-DB_PATH = Path(__file__).parent.parent / "dbs" / "sessions.db"
+DB_PATH = Path(__file__).parent.parent / "db" / "sessions.db"
 
 
 def _get_conn() -> sqlite3.Connection:

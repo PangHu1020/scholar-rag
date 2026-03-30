@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from config import Config
 from rag.retrieval import Retriever
@@ -36,6 +37,7 @@ _retriever: Retriever | None = None
 _retriever_tool: RetrieverTool | None = None
 _pdf_parser: PDFParser | None = None
 _rag_integration: RAGIntegration | None = None
+_checkpointer: AsyncPostgresSaver | None = None
 
 
 def get_llm() -> ChatOpenAI:
@@ -58,9 +60,13 @@ def get_rag_integration() -> RAGIntegration:
     return _rag_integration  # type: ignore
 
 
+def get_checkpointer() -> AsyncPostgresSaver:
+    return _checkpointer  # type: ignore
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _llm, _retriever, _retriever_tool, _pdf_parser, _rag_integration
+    global _llm, _retriever, _retriever_tool, _pdf_parser, _rag_integration, _checkpointer
 
     logger.info("Starting up — loading models …")
 
@@ -91,6 +97,11 @@ async def lifespan(app: FastAPI):
     upload_dir = Path(Config.UPLOAD_DIR)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Startup complete.")
-    yield
+    async with AsyncPostgresSaver.from_conn_string(Config.POSTGRES_URI) as cp:
+        await cp.setup()
+        _checkpointer = cp
+        logger.info("Startup complete.")
+        yield
+
+    _checkpointer = None
     logger.info("Shutting down.")

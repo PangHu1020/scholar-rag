@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from langchain_core.messages import HumanMessage
 
 from app.store import list_sessions, get_session, delete_session
-from app.routers.chat import _checkpointer
+from app.dependencies import get_checkpointer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -32,16 +32,17 @@ async def get_history(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
 
     config = {"configurable": {"thread_id": session_id}}
+    checkpointer = get_checkpointer()
     try:
-        state = _checkpointer.get(config)
+        checkpoint = await checkpointer.aget(config)
     except Exception:
-        state = None
+        checkpoint = None
 
-    if not state or not state.values:
+    if not checkpoint or not checkpoint.get("channel_values"):
         return {"session_id": session_id, "messages": []}
 
     messages = []
-    for msg in state.values.get("messages", []):
+    for msg in checkpoint["channel_values"].get("messages", []):
         if isinstance(msg, HumanMessage):
             messages.append({"role": "user", "content": msg.content})
         else:

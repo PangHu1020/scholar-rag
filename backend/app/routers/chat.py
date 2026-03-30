@@ -5,23 +5,20 @@ import uuid
 import logging
 from typing import AsyncGenerator
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse
 from langchain_core.messages import HumanMessage, AIMessage
 from pydantic import BaseModel
 
 from config import Config
-from app.dependencies import get_llm, get_retriever_tool
+from app.dependencies import get_llm, get_retriever_tool, get_checkpointer
 from app.store import create_session, get_session, update_session
 from agent.graph import build_graph
-from agent.checkpointer import create_memory_checkpointer, create_postgres_checkpointer
 from rag.citation import CitationExtractor
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
 
-_checkpointer = create_memory_checkpointer()
-# _checkpointer = create_postgres_checkpointer()
 
 class ChatRequest(BaseModel):
     query: str
@@ -34,23 +31,13 @@ def _build_graph():
         retriever=get_retriever_tool(),
         citation_extractor=CitationExtractor,
         max_retries=Config.MAX_RETRIES,
-        checkpointer=_checkpointer,
+        checkpointer=get_checkpointer(),
     )
 
 
 async def _stream_response(graph, query: str, session_id: str) -> AsyncGenerator[str, None]:
     config = {"configurable": {"thread_id": session_id}}
-    graph_input = {
-        "query": query,
-        "messages": [],
-        "summary": "",
-        "documents": [],
-        "sub_queries": [],
-        "sub_answers": [],
-        "answer": "",
-        "citations": [],
-        "synth_messages": [],
-    }
+    graph_input = {"query": query}
 
     yield json.dumps({"type": "session_id", "data": session_id})
     yield json.dumps({"type": "status", "data": "analyzing"})
@@ -81,6 +68,14 @@ async def _stream_response(graph, query: str, session_id: str) -> AsyncGenerator
 
         if not answer_buf:
             yield json.dumps({"type": "answer", "data": ""})
+
+        await graph.aupdate_state(config, {
+            "messages": [
+                HumanMessage(content=query),
+                AIMessage(content=answer_buf),
+            ],
+            "answer": answer_buf,
+        })
 
         yield json.dumps({"type": "citations", "data": final_citations})
 
