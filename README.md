@@ -16,7 +16,7 @@ Upload academic papers, ask questions in natural language, get grounded answers 
 
 ![Python](https://img.shields.io/badge/python-3.12-blue)
 ![React](https://img.shields.io/badge/react-18-61dafb)
-![LangGraph](https://img.shields.io/badge/LangGraph-1.x-orange)
+![LangGraph](https://img.shields.io/badge/LangGraph-0.x-orange)
 ![Milvus](https://img.shields.io/badge/Milvus-2.x-00bfa5)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
