@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 from typing import Optional
+from contextvars import ContextVar
 
 from langchain_core.tools import tool
 
@@ -13,6 +14,26 @@ from rag.retrieval import Retriever
 from rag.citation import CitationExtractor
 
 _retriever: Optional[Retriever] = None
+_query_type_ctx: ContextVar[str] = ContextVar("query_type", default="general")
+
+_ROUTE_CONFIG: dict[str, dict] = {
+    "experimental_result": {
+        "node_type_filter": ["table", "figure", "caption"],
+        "section_filter": None,
+    },
+    "method": {
+        "node_type_filter": None,
+        "section_filter": None,
+    },
+    "background": {
+        "node_type_filter": None,
+        "section_filter": None,
+    },
+    "general": {
+        "node_type_filter": None,
+        "section_filter": None,
+    },
+}
 
 
 def get_retriever() -> Retriever:
@@ -28,6 +49,10 @@ def get_retriever() -> Retriever:
     return _retriever
 
 
+def set_query_type(query_type: str):
+    _query_type_ctx.set(query_type)
+
+
 @tool
 def paper_retrieval(query: str) -> str:
     """Search the academic paper knowledge base and return relevant text chunks with citation info.
@@ -37,6 +62,9 @@ def paper_retrieval(query: str) -> str:
     their source metadata (paper, section, page).
     """
     retriever = get_retriever()
+    query_type = _query_type_ctx.get()
+    route = _ROUTE_CONFIG.get(query_type, _ROUTE_CONFIG["general"])
+
     docs = retriever.retrieve(
         query=query,
         k=Config.TOP_K,
@@ -45,6 +73,8 @@ def paper_retrieval(query: str) -> str:
         expand_parent=True,
         rrf_k=Config.RRF_K,
         fetch_k=Config.FETCH_K,
+        node_type_filter=route["node_type_filter"],
+        section_filter=route["section_filter"],
     )
 
     if not docs:

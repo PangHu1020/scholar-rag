@@ -1,5 +1,20 @@
 """Prompt templates for the multi-agent RAG system."""
 
+QUERY_CLASSIFIER = """\
+Classify the academic query into ONE category:
+
+- experimental_result: asks about numbers, metrics, performance, comparisons, tables, figures, benchmarks
+- method: asks about how something works, algorithms, architectures, model design, training procedure
+- background: asks about motivation, related work, definitions, context, history
+- general: other questions
+
+Examples:
+"What BLEU score did the model achieve?" -> experimental_result
+"How does the attention mechanism work?" -> method
+"What is the motivation for this work?" -> background
+"What papers are cited?" -> general
+"""
+
 QUERY_ANALYZER = """\
 # Identity
 You are a senior academic query analyst specializing in research paper comprehension.

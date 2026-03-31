@@ -43,8 +43,8 @@ class PDFParser:
     """Parse PDF documents into PaperNode structures."""
 
     def __init__(self):
-        self.converter = DocumentConverter()
         self.cleaner = TextCleaner()
+        self._converter_cache = {}
 
     def parse(self, pdf_path: str, paper_id: str) -> list[PaperNode]:
         """Parse PDF file into list of PaperNodes.
@@ -56,7 +56,34 @@ class PDFParser:
         Returns:
             List of PaperNode objects
         """
-        result = self.converter.convert(pdf_path)
+        nodes = self._parse_with_ocr(pdf_path, paper_id, use_ocr=False)
+        
+        total_text = sum(len(n.text) for n in nodes)
+        page_count = max((n.page_num for n in nodes), default=1)
+        
+        if total_text < 1000 or total_text / page_count < 200:
+            print(f"Low text detected ({total_text} chars, {page_count} pages), retrying with OCR...")
+            nodes = self._parse_with_ocr(pdf_path, paper_id, use_ocr=True)
+        
+        return nodes
+    
+    def _parse_with_ocr(self, pdf_path: str, paper_id: str, use_ocr: bool) -> list[PaperNode]:
+        """Internal parse with OCR option."""
+        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.document_converter import PdfFormatOption
+        from docling.datamodel.base_models import InputFormat
+        
+        if use_ocr not in self._converter_cache:
+            pipeline_options = PdfPipelineOptions()
+            pipeline_options.do_ocr = use_ocr
+            self._converter_cache[use_ocr] = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+                }
+            )
+        
+        converter = self._converter_cache[use_ocr]
+        result = converter.convert(pdf_path)
         doc = result.document
         
         page_height = self._get_page_height(doc)
@@ -64,25 +91,22 @@ class PDFParser:
         raw_items = [item for item, _ in doc.iterate_items()]
         filtered_items = self._filter_items(raw_items, page_height)
         sorted_items = self._sort_reading_order(filtered_items)
+        top_level_x = self._compute_top_level_x(sorted_items)
         
         nodes = []
         order = 0
         section_stack = []
-        node_map = {}
         
-        for i, item in enumerate(sorted_items):
-            prev_item = sorted_items[i-1] if i > 0 else None
-            next_item = sorted_items[i+1] if i < len(sorted_items)-1 else None
-            
+        for item in sorted_items:
             node = self._process_item(
-                item, paper_id, order, section_stack, node_map, prev_item, next_item
+                item, paper_id, order, section_stack, top_level_x
             )
             if node:
                 nodes.append(node)
-                node_map[node.node_id] = node
                 order += 1
         
         self._link_captions_to_figures_tables(nodes)
+        self._link_text_references(nodes)
         
         return nodes
 
@@ -112,6 +136,9 @@ class PDFParser:
             
             text = item.text.strip()
             if not text:
+                orig = getattr(item, 'orig', None)
+                if orig and orig.strip():
+                    filtered.append(item)
                 continue
             
             bbox = self._extract_bbox(item)
@@ -127,17 +154,73 @@ class PDFParser:
         return filtered
 
     def _sort_reading_order(self, items: list[Any]) -> list[Any]:
-        """Sort items by reading order using Docling's order."""
-        items_with_order = []
+        """Sort items by reading order using bbox coordinates.
         
+        PDF coordinate system: y increases upward (larger y = higher on page).
+        Strategy: group items at the same vertical band (row), sort rows top-to-bottom,
+        sort items within each row left-to-right. This handles both single and multi-column.
+        """
+        pages = {}
         for item in items:
             page_num = item.prov[0].page_no if item.prov and len(item.prov) > 0 else 0
-            order = item.prov[0].charspan[0] if item.prov and len(item.prov) > 0 and hasattr(item.prov[0], 'charspan') else 0
-            items_with_order.append((item, page_num, order))
+            if page_num not in pages:
+                pages[page_num] = []
+            pages[page_num].append(item)
         
-        items_with_order.sort(key=lambda x: (x[1], x[2]))
+        sorted_items = []
+        for page_num in sorted(pages.keys()):
+            page_items = pages[page_num]
+            
+            items_with_bbox = []
+            for item in page_items:
+                bbox = self._extract_bbox(item)
+                items_with_bbox.append((item, bbox))
+            
+            valid = [(item, bbox) for item, bbox in items_with_bbox if bbox]
+            no_bbox = [(item, bbox) for item, bbox in items_with_bbox if not bbox]
+            
+            if not valid:
+                sorted_items.extend([item for item, _ in items_with_bbox])
+                continue
+            
+            row_tolerance = self._estimate_row_tolerance(valid)
+            rows = self._group_into_rows(valid, row_tolerance)
+            
+            for row in rows:
+                row.sort(key=lambda x: x[1][0])
+            
+            for row in rows:
+                sorted_items.extend([item for item, _ in row])
+            sorted_items.extend([item for item, _ in no_bbox])
         
-        return [item for item, _, _ in items_with_order]
+        return sorted_items
+    
+    def _estimate_row_tolerance(self, items_with_bbox: list[tuple]) -> float:
+        """Estimate vertical tolerance for grouping items into rows."""
+        heights = [abs(bbox[1] - bbox[3]) for _, bbox in items_with_bbox if bbox]
+        if not heights:
+            return 10.0
+        avg_height = sum(heights) / len(heights)
+        return max(avg_height * 0.6, 5.0)
+    
+    def _group_into_rows(self, items_with_bbox: list[tuple], tolerance: float) -> list[list[tuple]]:
+        """Group items into rows based on vertical proximity."""
+        sorted_by_y = sorted(items_with_bbox, key=lambda x: -x[1][1])
+        
+        rows = []
+        for item, bbox in sorted_by_y:
+            placed = False
+            for row in rows:
+                row_y = row[0][1][1]
+                if abs(bbox[1] - row_y) <= tolerance:
+                    row.append((item, bbox))
+                    placed = True
+                    break
+            if not placed:
+                rows.append([(item, bbox)])
+        
+        rows.sort(key=lambda r: -r[0][1][1])
+        return rows
 
     def _process_item(
         self,
@@ -145,13 +228,13 @@ class PDFParser:
         paper_id: str,
         order: int,
         section_stack: list[str],
-        node_map: dict[str, PaperNode],
-        prev_item,
-        next_item
+        top_level_x: float
     ) -> Optional[PaperNode]:
         """Process a single document item into a PaperNode."""
         item_type = type(item).__name__
         raw_text = item.text if hasattr(item, 'text') else ""
+        if not raw_text and hasattr(item, 'orig') and item.orig:
+            raw_text = item.orig
         raw_text = self.cleaner.clean_text(raw_text)
         
         if self._is_caption_text(raw_text):
@@ -164,10 +247,11 @@ class PDFParser:
         
         node_id = str(uuid.uuid4())
         page_num = item.prov[0].page_no if item.prov and len(item.prov) > 0 else 0
-        bbox = self._extract_bbox(item) if node_type in ["figure", "table"] else None
+        bbox = self._extract_bbox(item) if node_type in ["figure", "table", "caption"] else None
         
         if node_type == "section_header":
-            self._update_section_stack(section_stack, raw_text)
+            item_bbox = self._extract_bbox(item)
+            self._update_section_stack(section_stack, raw_text, item_bbox, top_level_x)
         
         generator = NodeContentGeneratorFactory.get_generator(node_type)
         
@@ -195,8 +279,10 @@ class PDFParser:
         mapping = {
             "SectionHeaderItem": "section_header",
             "TextItem": "paragraph",
+            "ListItem": "paragraph",
             "TableItem": "table",
             "PictureItem": "figure",
+            "FormulaItem": "formula",
         }
         return mapping.get(item_type)
 
@@ -227,17 +313,32 @@ class PDFParser:
         
         return None
 
-    def _update_section_stack(self, section_stack: list[str], header_text: str):
-        """Update section stack based on header level.
-        
-        Handles numbered sections (e.g., '3.2.1 Title') by maintaining hierarchy.
-        """
-        match = re.match(r'^(\d+(?:\.\d+)*)\s+', header_text)
-        if match:
-            level = max(1, len(match.group(1).split('.')))
-            section_stack[:] = section_stack[:level-1] + [header_text]
-        else:
-            section_stack.append(header_text)
+    def _compute_top_level_x(self, items: list[Any]) -> float:
+        """Compute minimum left-edge x of all section headers as top-level baseline."""
+        xs = []
+        for item in items:
+            if type(item).__name__ == 'SectionHeaderItem':
+                bbox = self._extract_bbox(item)
+                if bbox:
+                    xs.append(bbox[0])
+        return min(xs) if xs else 0.0
+
+    def _is_top_level_section(self, header_text: str, bbox, top_level_x: float) -> bool:
+        """Determine if a section header is top-level via numeric prefix or x position."""
+        num_match = re.match(r'^(\d+(?:\.\d+)*)\s+', header_text)
+        if num_match:
+            dots = len(num_match.group(1).split('.'))
+            if dots > 1:
+                return False
+            if bbox:
+                return bbox[0] <= top_level_x + 10
+            return True
+        return True
+
+    def _update_section_stack(self, section_stack: list[str], header_text: str, bbox, top_level_x: float):
+        """Update section stack, keeping only the top-level section."""
+        if self._is_top_level_section(header_text, bbox, top_level_x):
+            section_stack[:] = [header_text]
 
     def _linearize_table(self, item) -> str:
         """Linearize table into key-value format."""
@@ -309,6 +410,28 @@ class PDFParser:
                             best_caption = other.text
         
         return best_caption
+
+    def _link_text_references(self, nodes: list[PaperNode]):
+        """Link paragraphs to figures/tables they reference in text."""
+        fig_table_index: dict[tuple[str, str], PaperNode] = {}
+        for node in nodes:
+            if node.node_type in ["figure", "table", "caption"]:
+                match = re.search(r'(Figure|Table)\s+(\d+)', node.text, re.IGNORECASE)
+                if match:
+                    key = (match.group(1).lower(), match.group(2))
+                    if key not in fig_table_index:
+                        fig_table_index[key] = node
+
+        for node in nodes:
+            if node.node_type not in ["paragraph", "formula"]:
+                continue
+            for match in re.finditer(r'(Figure|Table)\s+(\d+)', node.text, re.IGNORECASE):
+                key = (match.group(1).lower(), match.group(2))
+                target = fig_table_index.get(key)
+                if target and target.node_id not in node.related_ids:
+                    node.related_ids.append(target.node_id)
+                    if node.node_id not in target.related_ids:
+                        target.related_ids.append(node.node_id)
 
 
 class RAGIntegration:

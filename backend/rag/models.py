@@ -8,7 +8,8 @@ NodeType = Literal[
     "paragraph",
     "table",
     "figure",
-    "caption"
+    "caption",
+    "formula"
 ]
 
 

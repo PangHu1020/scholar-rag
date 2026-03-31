@@ -15,6 +15,9 @@ lib64/
 parts/
 sdist/
 var/
+MMDocIR/
+RPC-Bench/
+*.pdf
 wheels/
 *.egg-info/
 .installed.cfg

@@ -37,6 +37,7 @@ def merge_citations(left: list[dict], right: list[dict]) -> list[dict]:
 class AgentState(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
     query: str
+    query_type: str
     summary: str
     documents: list[str]
     sub_queries: list[str]

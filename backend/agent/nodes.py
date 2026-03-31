@@ -9,7 +9,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.documents import Document
 
 from .states import AgentState, SubAgentState
-from .prompts import QUERY_ANALYZER, SYNTHESIZER, GENERATOR, REFLECTOR, SUMMARIZER
+from .prompts import QUERY_ANALYZER, QUERY_CLASSIFIER, SYNTHESIZER, GENERATOR, REFLECTOR, SUMMARIZER
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,10 @@ WINDOW_SIZE = 6
 
 class QueryAnalysis(BaseModel):
     sub_queries: list[str] = Field(description="List of sub-queries, original query first")
+
+
+class QueryClassification(BaseModel):
+    query_type: str = Field(description="One of: experimental_result, method, background, general")
 
 
 class ReflectionResult(BaseModel):
@@ -77,6 +81,27 @@ async def analyze_query(state: AgentState, llm: BaseChatModel) -> dict:
 
     logger.info(f"Decomposed into {len(sub_queries)} sub-queries")
     return {"sub_queries": sub_queries}
+
+
+async def classify_query(state: AgentState, llm: BaseChatModel) -> dict:
+    from .tools import set_query_type
+    query = state["query"]
+
+    structured_llm = llm.with_structured_output(QueryClassification)
+    try:
+        result: QueryClassification = await structured_llm.ainvoke([
+            SystemMessage(content=QUERY_CLASSIFIER),
+            HumanMessage(content=query),
+        ])
+        query_type = result.query_type
+        if query_type not in ("experimental_result", "method", "background", "general"):
+            query_type = "general"
+    except Exception:
+        query_type = "general"
+
+    set_query_type(query_type)
+    logger.info(f"Query classified as: {query_type}")
+    return {"query_type": query_type}
 
 
 def prepare_synthesis(state: AgentState) -> dict:

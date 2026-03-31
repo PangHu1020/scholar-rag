@@ -10,6 +10,7 @@ from langgraph.types import Send
 from .states import AgentState, SubAgentState, SubAnswer
 from .nodes import (
     analyze_query,
+    classify_query,
     prepare_synthesis,
     summarize_conversation,
     retrieve,
@@ -95,18 +96,23 @@ def build_graph(
     async def summarize_node(state: AgentState) -> dict:
         return await summarize_conversation(state, llm=llm)
 
+    async def classify_node(state: AgentState) -> dict:
+        return await classify_query(state, llm=llm)
+
     async def analyze_node(state: AgentState) -> dict:
         return await analyze_query(state, llm=llm)
 
     graph = StateGraph(AgentState)
 
     graph.add_node("summarize", summarize_node)
+    graph.add_node("classify", classify_node)
     graph.add_node("analyze", analyze_node)
     graph.add_node("sub_agent", sub_agent_node)
     graph.add_node("prepare_synthesis", prepare_synthesis)
 
     graph.add_edge(START, "summarize")
-    graph.add_edge("summarize", "analyze")
+    graph.add_edge("summarize", "classify")
+    graph.add_edge("classify", "analyze")
     graph.add_conditional_edges("analyze", dispatch, ["sub_agent"])
     graph.add_edge("sub_agent", "prepare_synthesis")
     graph.add_edge("prepare_synthesis", END)

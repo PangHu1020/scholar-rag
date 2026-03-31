@@ -51,6 +51,8 @@ class Retriever:
         expand_parent: bool = True,
         rrf_k: int = 60,
         fetch_k: int = 20,
+        node_type_filter: Optional[list[str]] = None,
+        section_filter: Optional[str] = None,
     ) -> list[Document]:
         """Full retrieval pipeline.
 
@@ -62,6 +64,8 @@ class Retriever:
             expand_parent: Whether to expand child hits to parent chunks.
             rrf_k: RRF constant for hybrid fusion.
             fetch_k: Number of candidates to fetch before reranking.
+            node_type_filter: Restrict search to specific node types (e.g. ['table','figure']).
+            section_filter: Restrict search to sections containing this string.
         """
         if self.cache:
             cached = self.cache.get(query, k, rerank, expand_parent)
@@ -70,15 +74,16 @@ class Retriever:
                 return cached
         
         search_query = self._hyde(query) if use_hyde and self.llm else query
+        expr = self._build_expr(node_type_filter, section_filter)
 
         if rerank and self.reranker:
-            children = self._hybrid_search(self._child_store, search_query, fetch_k * RERANK_FETCH_MULTIPLIER, rrf_k)
+            children = self._hybrid_search(self._child_store, search_query, fetch_k * RERANK_FETCH_MULTIPLIER, rrf_k, expr)
             if not children:
                 logger.warning(f"No results found for query: {query[:50]}...")
                 return []
             children = self._rerank(query, children, fetch_k)
         else:
-            children = self._hybrid_search(self._child_store, search_query, fetch_k, rrf_k)
+            children = self._hybrid_search(self._child_store, search_query, fetch_k, rrf_k, expr)
             if not children:
                 logger.warning(f"No results found for query: {query[:50]}...")
                 return []
@@ -109,8 +114,18 @@ class Retriever:
         from .incremental import IncrementalUpdater
         return IncrementalUpdater(self._parent_store, self._child_store)
 
+    def _build_expr(self, node_type_filter: Optional[list[str]], section_filter: Optional[str]) -> Optional[str]:
+        """Build Milvus filter expression from routing constraints."""
+        parts = []
+        if node_type_filter:
+            types = " || ".join(f'node_type == "{t}"' for t in node_type_filter)
+            parts.append(f"({types})")
+        if section_filter:
+            parts.append(f'section_path like "%{section_filter}%"')
+        return " && ".join(parts) if parts else None
+
     def _hybrid_search(
-        self, store: Milvus, query: str, k: int, rrf_k: int
+        self, store: Milvus, query: str, k: int, rrf_k: int, expr: Optional[str] = None
     ) -> list[Document]:
         reranker = Function(
             name="rrf_reranker",
@@ -118,9 +133,10 @@ class Retriever:
             input_field_names=["dense", "sparse"],
             params={"k": rrf_k},
         )
-        results = store.similarity_search(
-            query, k=k, reranker=reranker, fetch_k=k
-        )
+        kwargs = {"k": k, "reranker": reranker, "fetch_k": k}
+        if expr:
+            kwargs["expr"] = expr
+        results = store.similarity_search(query, **kwargs)
         return results
 
     def _rerank(self, query: str, docs: list[Document], top_k: int) -> list[Document]:

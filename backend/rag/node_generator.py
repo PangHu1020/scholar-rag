@@ -136,6 +136,22 @@ class TableGenerator(NodeContentGenerator):
         return "\n".join(lines)
 
 
+class FormulaGenerator(NodeContentGenerator):
+    """Generate content for mathematical formulas."""
+
+    def generate_text(
+        self,
+        node: PaperNode,
+        raw_content: str,
+        _context: dict
+    ) -> str:
+        """Generate formula text with section context."""
+        if node.section_path:
+            section_path = " > ".join(node.section_path)
+            return f"Section: {section_path}\n\nFormula:\n{raw_content}"
+        return f"Formula:\n{raw_content}"
+
+
 class NodeContentGeneratorFactory:
     """Factory for creating node content generators."""
 
@@ -145,6 +161,7 @@ class NodeContentGeneratorFactory:
         "caption": CaptionGenerator(),
         "figure": FigureGenerator(),
         "table": TableGenerator(),
+        "formula": FormulaGenerator(),
     }
 
     @classmethod
