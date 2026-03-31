@@ -49,6 +49,7 @@ class AgentState(TypedDict):
 
 class SubAgentState(TypedDict):
     query: str
+    query_type: str
     documents: list[str]
     answer: str
     citations: list[dict]

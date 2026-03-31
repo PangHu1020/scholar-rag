@@ -175,8 +175,21 @@ async def summarize_conversation(state: AgentState, llm: BaseChatModel) -> dict:
 async def retrieve(state: SubAgentState, retriever, citation_extractor) -> dict:
     from rag.factory import is_visual_query
     query = state["query"]
+    query_type = state.get("query_type", "general")
 
-    docs: list[Document] = retriever.invoke(query)
+    _ROUTE_CONFIG: dict[str, dict] = {
+        "experimental_result": {"node_type_filter": ["table", "figure", "caption"]},
+        "method": {"node_type_filter": None},
+        "background": {"node_type_filter": None},
+        "general": {"node_type_filter": None},
+    }
+    route = _ROUTE_CONFIG.get(query_type, _ROUTE_CONFIG["general"])
+
+    docs: list[Document] = retriever.invoke(query, node_type_filter=route["node_type_filter"])
+
+    if not docs and route["node_type_filter"]:
+        logger.info(f"No results with filter, retrying without filter")
+        docs = retriever.invoke(query, node_type_filter=None)
 
     citations = citation_extractor.extract_all(docs) if docs else []
     documents = []

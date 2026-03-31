@@ -77,14 +77,14 @@ def build_graph(
     checkpointer: Optional[BaseCheckpointSaver] = None,
     vision_service=None,
 ):
-    sub_graph = _build_sub_agent_graph(llm, retriever, citation_extractor, max_retries, vision_service).compile()
-
     def dispatch(state: AgentState):
-        return [Send("sub_agent", {"query": q}) for q in state["sub_queries"]]
+        return [Send("sub_agent", {"query": q, "query_type": state.get("query_type", "general")}) for q in state["sub_queries"]]
 
     async def sub_agent_node(state: dict) -> dict:
+        sub_graph = _build_sub_agent_graph(llm, retriever, citation_extractor, max_retries, vision_service).compile()
         sub_input = {
             "query": state["query"],
+            "query_type": state.get("query_type", "general"),
             "documents": [],
             "answer": "",
             "citations": [],
