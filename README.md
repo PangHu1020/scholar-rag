@@ -31,7 +31,10 @@ ScholarRAG is an end-to-end academic paper Q&A system. It parses PDFs with full 
 
 - Multi-agent query decomposition with parallel retrieval and self-reflection
 - Hybrid BM25 + dense retrieval with cross-encoder reranking
-- Structured PDF parsing preserving section hierarchy, tables, and captions
+- Structured PDF parsing preserving section hierarchy, tables, figures, formulas, and captions
+- Smart OCR fallback: fast text extraction by default, OCR only when needed
+- Query classification routing: experimental/method/background queries use targeted retrieval strategies
+- Multimodal figure understanding: lazy VLM invocation for visual queries and insufficient answers
 - Source-level citations with paper, section, and page references
 - Multi-turn conversation with memory compression
 
@@ -51,9 +54,13 @@ This project is beginner-friendly and well-suited for anyone looking to learn an
 | Category | Details |
 |---|---|
 | **Retrieval** | BM25 + dense embedding fusion (RRF), cross-encoder reranking, parent-child chunk expansion |
-| **PDF Parsing** | Docling-based with section hierarchy, table linearization, figure/caption linking |
-| **Agent** | LangGraph multi-agent: query decomposition -> parallel sub-agents -> synthesis |
-| **Reflection** | Sub-agents self-evaluate sufficiency, retry with refined queries |
+| **PDF Parsing** | Docling-based with section hierarchy, table linearization, formula extraction, figure/caption linking |
+| **Smart OCR** | Fast text extraction by default; auto-fallback to full OCR when text density is too low |
+| **Figure Extraction** | bbox-based figure image cropping saved per paper (pymupdf) |
+| **Query Routing** | LLM classifies queries (experimental/method/background/general) and filters retrieval accordingly |
+| **VLM Integration** | Lazy figure analysis: invoked for visual queries or when text answer is insufficient; descriptions cached |
+| **Agent** | LangGraph multi-agent: query classification -> decomposition -> parallel sub-agents -> synthesis |
+| **Reflection** | Sub-agents self-evaluate sufficiency, retry with refined queries or trigger VLM fallback |
 | **Memory** | Sliding window + LLM summary compression for multi-turn context |
 | **Streaming** | SSE real-time streamed responses |
 | **Citations** | Auto-generated source references (paper, section, page) |
@@ -76,8 +83,10 @@ This project is beginner-friendly and well-suited for anyone looking to learn an
 backend/
   app/            FastAPI application (routers, dependencies, session store)
   agent/          LangGraph multi-agent (graph, nodes, states, prompts)
-  rag/            Retrieval pipeline (hybrid search, reranker, PDF parser, citations)
+  rag/            Retrieval pipeline (hybrid search, reranker, PDF parser, citations, VLM)
   eval/           RAGAS & retrieval evaluation scripts
+  test/           Unit and integration tests
+  data/           Extracted figure images (per paper_id)
   config.py       Environment-based configuration
 
 frontend/
@@ -141,6 +150,10 @@ All settings via `backend/.env`:
 | `TOP_K` | `5` | Retrieved documents per query |
 | `FETCH_K` | `20` | Candidates before reranking |
 | `MAX_RETRIES` | `0` | Reflection retry limit |
+| `VLM_ENABLED` | `false` | Enable VLM for figure analysis |
+| `VLM_BASE_URL` | `http://localhost:8848/v1` | VLM endpoint (OpenAI-compatible, multimodal) |
+| `VLM_MODEL` | `qwen-vl` | VLM model name |
+| `VLM_API_KEY` | `empty` | VLM API key |
 
 ---
 
@@ -181,7 +194,9 @@ python eval/eval_generation.py
 | LLM Orchestration | LangGraph, LangChain |
 | Vector Database | Milvus 2.x (BM25 + dense hybrid) |
 | PDF Parsing | Docling |
+| Figure Extraction | PyMuPDF (pymupdf) |
 | Reranking | BGE Reranker v2 (CrossEncoder) |
+| VLM | Any OpenAI-compatible multimodal model (Qwen-VL, GPT-4V, etc.) |
 | Backend | FastAPI, SSE-Starlette, Uvicorn |
 | Frontend | React 18, TailwindCSS, Vite |
 | Evaluation | RAGAS |

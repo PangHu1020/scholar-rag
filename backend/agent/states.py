@@ -55,3 +55,4 @@ class SubAgentState(TypedDict):
     is_sufficient: bool
     retry_queries: Annotated[list[str], operator.add]
     retries: int
+    needs_vlm: bool

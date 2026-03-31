@@ -36,6 +36,7 @@ def _build_sub_agent_graph(
     retriever,
     citation_extractor,
     max_retries: int,
+    vision_service=None,
 ) -> StateGraph:
     sg = StateGraph(SubAgentState)
 
@@ -43,10 +44,10 @@ def _build_sub_agent_graph(
         return await retrieve(state, retriever=retriever, citation_extractor=citation_extractor)
 
     async def generate_node(state: SubAgentState) -> dict:
-        return await generate(state, llm=llm)
+        return await generate(state, llm=llm, vision_service=vision_service)
 
     async def reflect_node(state: SubAgentState) -> dict:
-        return await reflect(state, llm=llm)
+        return await reflect(state, llm=llm, vision_service=vision_service)
 
     def retry_router(state: SubAgentState) -> str:
         return should_retry(state, max_retries=max_retries)
@@ -74,8 +75,9 @@ def build_graph(
     citation_extractor,
     max_retries: int = 2,
     checkpointer: Optional[BaseCheckpointSaver] = None,
+    vision_service=None,
 ):
-    sub_graph = _build_sub_agent_graph(llm, retriever, citation_extractor, max_retries).compile()
+    sub_graph = _build_sub_agent_graph(llm, retriever, citation_extractor, max_retries, vision_service).compile()
 
     def dispatch(state: AgentState):
         return [Send("sub_agent", {"query": q}) for q in state["sub_queries"]]
@@ -89,6 +91,7 @@ def build_graph(
             "is_sufficient": False,
             "retry_queries": [],
             "retries": 0,
+            "needs_vlm": False,
         }
         result = await sub_graph.ainvoke(sub_input)
         return _collect_sub_answer(result)

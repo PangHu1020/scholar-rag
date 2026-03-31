@@ -173,6 +173,7 @@ async def summarize_conversation(state: AgentState, llm: BaseChatModel) -> dict:
 # --------------- Sub-agent nodes ---------------
 
 async def retrieve(state: SubAgentState, retriever, citation_extractor) -> dict:
+    from rag.factory import is_visual_query
     query = state["query"]
 
     docs: list[Document] = retriever.invoke(query)
@@ -186,17 +187,50 @@ async def retrieve(state: SubAgentState, retriever, citation_extractor) -> dict:
     if len(docs) != len(citations):
         logger.warning(f"Doc/citation count mismatch: {len(docs)} docs vs {len(citations)} citations")
 
+    # Determine if VLM should be invoked in generate step
+    has_figure = any(
+        c.get("node_type") == "figure" and c.get("metadata", {}).get("image_path")
+        for c in citations
+    )
+    needs_vlm = is_visual_query(query) and has_figure
+
     truncated = query[:50] + ("..." if len(query) > 50 else "")
-    logger.info(f"Retrieved {len(documents)} docs for: {truncated}")
-    return {"documents": documents, "citations": citations}
+    logger.info(f"Retrieved {len(documents)} docs for: {truncated} | needs_vlm={needs_vlm}")
+    return {"documents": documents, "citations": citations, "needs_vlm": needs_vlm}
 
 
-async def generate(state: SubAgentState, llm: BaseChatModel) -> dict:
+async def generate(state: SubAgentState, llm: BaseChatModel, vision_service=None) -> dict:
     query = state["query"]
     documents = state.get("documents", [])
+    citations = state.get("citations", [])
+    needs_vlm = state.get("needs_vlm", False)
 
     if not documents:
         return {"answer": "No relevant information found.", "citations": []}
+
+    # VLM enhancement: inject figure descriptions before generation
+    if needs_vlm and vision_service:
+        from rag.factory import should_invoke_vlm
+        has_figure = any(
+            c.get("node_type") == "figure" and c.get("metadata", {}).get("image_path")
+            for c in citations
+        )
+        if should_invoke_vlm(query, has_figure):
+            for cite in citations:
+                if cite.get("node_type") != "figure":
+                    continue
+                image_path = cite.get("metadata", {}).get("image_path")
+                if not image_path:
+                    continue
+                vlm_desc = cite.get("metadata", {}).get("vlm_description")
+                if not vlm_desc:
+                    caption = cite.get("text", "")
+                    vlm_desc = vision_service.analyze_figure(image_path, caption)
+                    if vlm_desc:
+                        cite.setdefault("metadata", {})["vlm_description"] = vlm_desc
+                if vlm_desc:
+                    documents = list(documents) + [f"[Figure Analysis] {vlm_desc}"]
+                    logger.info(f"VLM analysis injected for figure: {image_path}")
 
     context = "\n\n".join(f"[{i}] {d}" for i, d in enumerate(documents, 1))
 
@@ -208,10 +242,11 @@ async def generate(state: SubAgentState, llm: BaseChatModel) -> dict:
     return {"answer": resp.content}
 
 
-async def reflect(state: SubAgentState, llm: BaseChatModel) -> dict:
+async def reflect(state: SubAgentState, llm: BaseChatModel, vision_service=None) -> dict:
     query = state["query"]
     answer = state.get("answer", "")
     documents = state.get("documents", [])
+    citations = state.get("citations", [])
     retries = state.get("retries", 0)
 
     if not documents:
@@ -228,6 +263,45 @@ async def reflect(state: SubAgentState, llm: BaseChatModel) -> dict:
     except Exception:
         is_sufficient = True
         retry_queries = []
+
+    # VLM fallback: answer insufficient + has figures + VLM not yet used
+    if not is_sufficient and vision_service and not state.get("needs_vlm", False):
+        from rag.factory import should_invoke_vlm
+        figure_citations = [
+            c for c in citations
+            if c.get("node_type") == "figure" and c.get("metadata", {}).get("image_path")
+        ]
+        has_figure = bool(figure_citations)
+        if should_invoke_vlm(query, has_figure, answer=answer):
+            # Inject VLM descriptions and re-generate
+            extra_docs = []
+            for cite in figure_citations[:2]:  # cap at 2 to control cost
+                image_path = cite["metadata"]["image_path"]
+                vlm_desc = cite["metadata"].get("vlm_description")
+                if not vlm_desc:
+                    caption = cite.get("text", "")
+                    vlm_desc = vision_service.analyze_figure(image_path, caption)
+                    if vlm_desc:
+                        cite["metadata"]["vlm_description"] = vlm_desc
+                if vlm_desc:
+                    extra_docs.append(f"[Figure Analysis] {vlm_desc}")
+                    logger.info(f"VLM fallback triggered for: {image_path}")
+
+            if extra_docs:
+                enhanced_docs = list(documents) + extra_docs
+                context = "\n\n".join(f"[{i}] {d}" for i, d in enumerate(enhanced_docs, 1))
+                resp = await llm.ainvoke([
+                    SystemMessage(content=GENERATOR),
+                    HumanMessage(content=f"Context:\n{context}\n\nQuestion: {query}"),
+                ])
+                return {
+                    "answer": resp.content,
+                    "documents": enhanced_docs,
+                    "needs_vlm": True,   # mark as used to prevent re-trigger
+                    "is_sufficient": True,
+                    "retry_queries": [],
+                    "retries": retries + 1,
+                }
 
     return {
         "is_sufficient": is_sufficient,

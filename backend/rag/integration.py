@@ -12,6 +12,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from .models import PaperNode, NodeType
 from .node_generator import NodeContentGeneratorFactory, TableGenerator
 
+FIGURE_SAVE_DIR = Path("./data/figures")
+
 
 class TextCleaner:
     """Clean and normalize text content."""
@@ -42,9 +44,10 @@ class TextCleaner:
 class PDFParser:
     """Parse PDF documents into PaperNode structures."""
 
-    def __init__(self):
+    def __init__(self, figure_save_dir: Optional[Path] = None):
         self.cleaner = TextCleaner()
         self._converter_cache = {}
+        self.figure_save_dir = figure_save_dir or FIGURE_SAVE_DIR
 
     def parse(self, pdf_path: str, paper_id: str) -> list[PaperNode]:
         """Parse PDF file into list of PaperNodes.
@@ -85,6 +88,7 @@ class PDFParser:
         converter = self._converter_cache[use_ocr]
         result = converter.convert(pdf_path)
         doc = result.document
+        self._fitz_doc = None  # reset per parse call
         
         page_height = self._get_page_height(doc)
         
@@ -107,6 +111,7 @@ class PDFParser:
         
         self._link_captions_to_figures_tables(nodes)
         self._link_text_references(nodes)
+        self._extract_figure_images(pdf_path, doc, nodes)
         
         return nodes
 
@@ -433,6 +438,66 @@ class PDFParser:
                     if node.node_id not in target.related_ids:
                         target.related_ids.append(node.node_id)
 
+    def _extract_figure_images(self, pdf_path: str, doc, nodes: list[PaperNode]):
+        """Crop and save figure images using pymupdf based on bbox.
+
+        PDF coordinate system (pymupdf): origin top-left, y increases downward.
+        Docling bbox: (l, t, r, b) where t > b (origin bottom-left).
+        We convert via: fitz_y = page_height - docling_y.
+        """
+        try:
+            import fitz  # pymupdf
+        except ImportError:
+            print("pymupdf not installed, skipping figure image extraction.")
+            return
+
+        figure_nodes = [n for n in nodes if n.node_type == "figure" and n.bbox and n.page_num]
+        if not figure_nodes:
+            return
+
+        try:
+            fitz_doc = fitz.open(pdf_path)
+        except Exception as e:
+            print(f"Failed to open PDF with pymupdf: {e}")
+            return
+
+        paper_id = figure_nodes[0].paper_id
+        save_dir = self.figure_save_dir / paper_id
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build page height map from fitz (points)
+        page_heights = {i: fitz_doc[i].rect.height for i in range(len(fitz_doc))}
+
+        for node in figure_nodes:
+            page_idx = node.page_num - 1  # fitz is 0-indexed
+            if page_idx < 0 or page_idx >= len(fitz_doc):
+                continue
+
+            page = fitz_doc[page_idx]
+            ph = page_heights[page_idx]
+
+            # Docling bbox: (l, t, r, b) in PDF points, origin bottom-left
+            l, t, r, b = node.bbox
+            # Convert to fitz (origin top-left)
+            fitz_rect = fitz.Rect(l, ph - t, r, ph - b)
+            # Add small padding
+            fitz_rect = fitz_rect + fitz.Rect(-4, -4, 4, 4)
+            fitz_rect = fitz_rect & page.rect  # clamp to page
+
+            if fitz_rect.is_empty or fitz_rect.is_infinite:
+                continue
+
+            try:
+                mat = fitz.Matrix(2.0, 2.0)  # 2x DPI for clarity
+                clip = page.get_pixmap(matrix=mat, clip=fitz_rect)
+                img_path = save_dir / f"page{node.page_num}_order{node.order}.png"
+                clip.save(str(img_path))
+                node.image_path = str(img_path)
+            except Exception as e:
+                print(f"Failed to crop figure {node.node_id}: {e}")
+
+        fitz_doc.close()
+
 
 class RAGIntegration:
     """Convert nodes to documents and store in Milvus with hybrid retrieval."""
@@ -471,7 +536,11 @@ class RAGIntegration:
                 metadata["bbox"] = str(node.bbox)
             if node.parent_id:
                 metadata["node_parent_id"] = node.parent_id
-            
+            if node.image_path:
+                metadata["image_path"] = node.image_path
+            # vlm_description starts empty; populated lazily at query time
+            metadata["vlm_description"] = node.metadata.get("vlm_description", "")
+
             metadata.update({k: v for k, v in node.metadata.items() if k != "item"})
             
             docs.append(Document(page_content=node.text, metadata=metadata))

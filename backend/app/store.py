@@ -137,3 +137,13 @@ def delete_file_record(file_id: str) -> Optional[dict]:
     conn.commit()
     conn.close()
     return dict(row)
+
+
+def clear_all_files() -> int:
+    """Delete all file records. Returns number of deleted rows."""
+    conn = _get_conn()
+    cur = conn.execute("DELETE FROM files")
+    conn.commit()
+    count = cur.rowcount
+    conn.close()
+    return count

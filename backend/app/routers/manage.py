@@ -1,11 +1,14 @@
 """Collection management + health check APIs."""
 
 import logging
+import shutil
+from pathlib import Path
 
 from fastapi import APIRouter
 from pymilvus import connections, utility
 
 from config import Config
+from app.store import clear_all_files
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["management"])
@@ -23,6 +26,22 @@ async def clear_collection():
                 utility.drop_collection(name, using=alias)
                 dropped.append(name)
         connections.disconnect(alias)
+
+        # Clear all uploaded PDFs
+        upload_dir = Path(Config.UPLOAD_DIR)
+        if upload_dir.exists():
+            for f in upload_dir.iterdir():
+                if f.suffix == ".pdf":
+                    f.unlink(missing_ok=True)
+
+        # Clear all extracted figures
+        figures_dir = Path("data/figures")
+        if figures_dir.exists():
+            shutil.rmtree(figures_dir)
+
+        # Clear file records from store
+        clear_all_files()
+
         return {"ok": True, "dropped": dropped}
     except Exception as e:
         logger.exception("Failed to clear collection")

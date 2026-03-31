@@ -29,6 +29,11 @@ class Config:
     LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))
     MAX_RETRIES = int(os.getenv("MAX_RETRIES", "2"))
 
+    VLM_ENABLED = os.getenv("VLM_ENABLED", "false").lower() == "true"
+    VLM_BASE_URL = os.getenv("VLM_BASE_URL", "http://localhost:11434/v1")
+    VLM_MODEL = os.getenv("VLM_MODEL", "qwen-vl")
+    VLM_API_KEY = os.getenv("VLM_API_KEY", "ollama")
+
     POSTGRES_URI = os.getenv("POSTGRES_URI", "postgresql://postgres:postgres@localhost:5432/scholar_rag")
 
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", "./uploads")

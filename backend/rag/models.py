@@ -31,4 +31,6 @@ class PaperNode:
     parent_id: Optional[str] = None
     related_ids: list[str] = field(default_factory=list)
 
+    image_path: Optional[str] = None  # saved figure crop path (figures only)
+
     metadata: dict[str, Any] = field(default_factory=dict)

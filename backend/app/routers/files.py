@@ -3,6 +3,7 @@
 import uuid
 import hashlib
 import logging
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, HTTPException
@@ -91,5 +92,9 @@ async def remove_file(file_id: str):
 
     save_path = Path(Config.UPLOAD_DIR) / f"{file_id}.pdf"
     save_path.unlink(missing_ok=True)
+
+    figures_dir = Path("data/figures") / record["paper_id"]
+    if figures_dir.exists():
+        shutil.rmtree(figures_dir)
 
     return {"ok": True, "paper_id": record["paper_id"]}
