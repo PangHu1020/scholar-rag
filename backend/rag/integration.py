@@ -584,25 +584,23 @@ class RAGIntegration:
         bm25 = BM25BuiltInFunction(input_field_names="text", output_field_names="sparse")
         
         try:
-            Milvus.from_documents(
-                children,
-                self.embeddings,
+            child_store = Milvus(
+                embedding_function=self.embeddings,
                 builtin_function=bm25,
                 vector_field=["dense", "sparse"],
                 collection_name=f"{self.collection_name}_children",
                 connection_args={"uri": self.milvus_uri},
-                drop_old=True,
             )
+            child_store.add_documents(children)
             
-            Milvus.from_documents(
-                parents,
-                self.embeddings,
+            parent_store = Milvus(
+                embedding_function=self.embeddings,
                 builtin_function=bm25,
                 vector_field=["dense", "sparse"],
                 collection_name=f"{self.collection_name}_parents",
                 connection_args={"uri": self.milvus_uri},
-                drop_old=True,
             )
+            parent_store.add_documents(parents)
             return True
         except Exception as e:
             print(f"Error storing in Milvus: {e}")

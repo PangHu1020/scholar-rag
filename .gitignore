@@ -33,12 +33,11 @@ wheels/
 # Data
 uploads/*
 !uploads/.gitkeep
-data/*
+data/**
 !data/.gitkeep
 pdf/
 *.db
 *.csv
-data/*
 
 # Testing
 .pytest_cache/
