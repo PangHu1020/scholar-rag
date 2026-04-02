@@ -106,7 +106,7 @@ This project is **beginner-friendly** and well-suited for anyone looking to lear
 ## 📽️ Architecture
 
 <div align="center">
-  <img src="doc/architecture.png" alt="Architecture Diagram" width="720">
+  <img src="doc/scholar_rag.png" alt="Architecture Diagram" width="720">
 </div>
 
 ---
