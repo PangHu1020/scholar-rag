@@ -54,7 +54,11 @@ This project is **beginner-friendly** and well-suited for anyone looking to lear
 - [📽️ Architecture](#️-architecture)
 - [📁 Project Structure](#-license)
 - [📖 Quick Start](#-quick-start)
-- [🔗 Configuration](#-configuration)
+  - [Prerequisites](#prerequisites)
+  - [Configuration](#configuration)
+  - [Backend](#backend)
+  - [Frontend](#frontend)
+  - [Use](#use)
 - [🪩 API Reference](#-api-reference)
 - [📊 Evaluation](#-evaluation)
 - [🗝️ Tech Stack](#️-tech-stack)
@@ -137,7 +141,55 @@ frontend/
 - [Milvus 2.x](https://milvus.io/docs/install_standalone-docker.md) running on `localhost:19530`
 - A vLLM / Ollama / OpenAI-compatible LLM endpoint
 
-### 1. Backend
+### Configuration
+
+All settings via `backend/.env`:
+
+```yaml
+# Milvus Configuration
+MILVUS_URI=http://localhost:19530      # Milvus connection URI
+COLLECTION_NAME=papers                 # Collection name prefix
+
+# Model Paths
+EMBEDDING_MODEL=BAAI/bge-small-en-v1.5 # Embedding model path
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3 # Reranker model path
+
+# Retrieval Parameters
+FETCH_K=20                             # Candidates before reranking
+TOP_K=5                                # Retrieved documents per query
+RRF_K=60
+
+# Cache Configuration
+ENABLE_CACHE=true
+CACHE_MAX_SIZE=1000
+
+# LLM Configuration
+LLM_BASE_URL=http://localhost:8848/v1  # LLM endpoint (OpenAI-compatible)
+LLM_MODEL=GPT-4o-mini                  # Model name
+LLM_API_KEY=empty
+LLM_TEMPERATURE=0.1                    # Generation temperature
+LLM_MAX_TOKENS=4096
+MAX_RETRIES=0                          # Reflection retry limit
+
+# VLM Configuration
+VLM_ENABLED=true                       # Enable VLM for figure analysis
+VLM_BASE_URL=http://localhost:8080/v1  # VLM endpoint (OpenAI-compatible, multimodal)
+VLM_MODEL=Qwen3-vl-4B                  # VLM model name
+VLM_API_KEY=empty                      # VLM API key
+
+# Postgres (checkpointer + session store)
+POSTGRES_URI=postgresql://postgres:postgres@localhost:5432/scholar_rag
+
+# Upload
+UPLOAD_DIR=./uploads
+MAX_UPLOAD_SIZE_MB=50
+
+# Server
+HOST=0.0.0.0
+PORT=8000
+```
+
+### Backend
 
 ```bash
 cd backend
@@ -146,7 +198,7 @@ pip install -r requirements.txt
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 2. Frontend
+### Frontend
 
 ```bash
 cd frontend
@@ -156,34 +208,11 @@ npm run dev             # dev mode at http://localhost:5173
 npm run build           # production build, served by backend at /
 ```
 
-### 3. Use
+### Use
 
 1. Open the app in your browser
 2. Upload PDF papers via the upload panel
 3. Ask questions -- get cited answers in seconds
-
----
-
-## 🔗 Configuration
-
-All settings via `backend/.env`:
-
-| Variable | Default | Description |
-|---|---|---|
-| `MILVUS_URI` | `http://localhost:19530` | Milvus connection URI |
-| `COLLECTION_NAME` | `papers` | Collection name prefix |
-| `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Embedding model path |
-| `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker model path |
-| `LLM_BASE_URL` | `http://localhost:8848/v1` | LLM endpoint (OpenAI-compatible) |
-| `LLM_MODEL` | `GPT-4o-mini` | Model name |
-| `LLM_TEMPERATURE` | `0.1` | Generation temperature |
-| `TOP_K` | `5` | Retrieved documents per query |
-| `FETCH_K` | `20` | Candidates before reranking |
-| `MAX_RETRIES` | `0` | Reflection retry limit |
-| `VLM_ENABLED` | `false` | Enable VLM for figure analysis |
-| `VLM_BASE_URL` | `http://localhost:8848/v1` | VLM endpoint (OpenAI-compatible, multimodal) |
-| `VLM_MODEL` | `qwen-vl` | VLM model name |
-| `VLM_API_KEY` | `empty` | VLM API key |
 
 ---
 
