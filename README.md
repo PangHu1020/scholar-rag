@@ -22,9 +22,12 @@ Upload academic papers, ask questions in natural language, get grounded answers 
 [Quick Start](#quick-start) | [Features](#features) | [Architecture](#architecture) | [API Reference](#api-reference)
 </div>
 
+> [!NOTE]
+> Still undergoing continuous optimization and updates...
+
 ## What is ScholarRAG?
 
-<video src="./resource/ScholarRAG.mp4" controls></video>
+<video src="https://github.com/PangHu1020/scholar-rag/blob/curme/resource/ScholarRAG.mp4" controls></video>
 
 ScholarRAG is an end-to-end academic paper Q&A system. It parses PDFs with full structural awareness (sections, tables, figures), retrieves relevant passages via hybrid search, and generates cited answers through a multi-agent pipeline -- all accessible through a clean chat interface.
 
@@ -98,10 +101,9 @@ This project is **beginner-friendly** and well-suited for anyone looking to lear
 
 ## 📽️ Architecture
 
-<!-- TODO: replace with actual diagram -->
-<p align="center">
+<div align="center">
   <img src="doc/architecture.png" alt="Architecture Diagram" width="720">
-</p>
+</div>
 
 ---
 
@@ -433,8 +435,8 @@ This project is open source and available under the [MIT License](./LICENSE).
 
 ## 🎉 Key Contributors
 
-- [PangHu1020 🐯](https://github.com/PangHu1020)
-- [curme-miller 🐮](https://github.com/curme-miller)
+- [PangHu1020](https://github.com/PangHu1020)
+- [curme-miller](https://github.com/curme-miller)
 
 ---
 
