@@ -106,28 +106,107 @@ This project is **beginner-friendly** and well-suited for anyone looking to lear
 ## 📽️ Architecture
 
 <div align="center">
-  <img src="doc/scholar_rag.png" alt="Architecture Diagram" width="720">
+  <img src="doc/scholsr_rag.png" alt="Architecture Diagram" width="720">
 </div>
 
 ---
 
 ## 📁 Project Structure
 
-```yaml
-backend/
-  app/            FastAPI application (routers, dependencies, session store)
-  agent/          LangGraph multi-agent (graph, nodes, states, prompts)
-  rag/            Retrieval pipeline (hybrid search, reranker, PDF parser, citations, VLM)
-  eval/           RAGAS & retrieval evaluation scripts
-  test/           Unit and integration tests
-  data/           Extracted figure images (per paper_id)
-  config.py       Environment-based configuration
-
-frontend/
-  src/
-    App.jsx       Main layout (sidebar + chat + panels)
-    api.js        API client (fetch + SSE streaming)
-    components/   Sidebar, ChatMessages, ChatInput, FileUpload, SettingsPanel
+```
+scholar-rag/
+├── backend/                          # Python backend (FastAPI + LangGraph + RAG)
+│   ├── app/                          # FastAPI application layer
+│   │   ├── __init__.py               # Module initialization
+│   │   ├── main.py                   # FastAPI entry point: register routes, CORS middleware, mount frontend static files
+│   │   ├── dependencies.py           # Application lifecycle management: singleton initialization (LLM, Retriever, PDFParser, PostgreSQL checkpointer) and getter functions
+│   │   ├── store.py                  # SQLite session and file metadata storage (sessions/files tables, zero-config file database)
+│   │   └── routers/                  # API routing modules
+│   │       ├── __init__.py
+│   │       ├── chat.py               # POST /api/chat — SSE streaming conversation (build LangGraph, push answer/citations/status events token by token)
+│   │       ├── sessions.py           # Session management: list, details, history messages (rebuild from PostgreSQL checkpointer), delete
+│   │       ├── files.py              # PDF upload (SHA256 deduplication, Docling parsing, chunking into Milvus), file list, delete (sync cleanup vectors)
+│   │       └── manage.py             # Collection management: clear Milvus collection + uploads/figures; health check (Milvus & LLM connectivity)
+│   │
+│   ├── agent/                        # LangGraph multi-agent layer
+│   │   ├── states.py                 # State definitions: AgentState (top-level), SubAgentState (sub-agent), SubAnswer; custom merge functions
+│   │   ├── graph.py                  # Graph assembly: main graph (summarize→classify→analyze→sub_agents→prepare_synthesis) + sub-graph (retrieve→generate→reflect→retry)
+│   │   ├── nodes.py                  # Node implementations: query classification/decomposition, retrieval, generation, reflection (with VLM fallback), conversation summary compression, synthesis (citation remapping)
+│   │   ├── prompts.py                # All prompt templates: QUERY_CLASSIFIER / ANALYZER / SYNTHESIZER / GENERATOR / REFLECTOR / SUMMARIZER
+│   │   ├── tools.py                  # Tool definitions: paper_retrieval (retrieval tool with query_type routing), ContextVar context variables
+│   │   └── checkpointer.py           # Checkpointer factory: create_memory_checkpointer() / create_postgres_checkpointer() (async context manager)
+│   │
+│   ├── rag/                          # RAG retrieval and parsing core
+│   │   ├── models.py                 # Data models: PaperNode (node_id, paper_id, node_type, text, page_num, section_path, bbox, image_path, etc.)
+│   │   ├── integration.py            # PDF parsing & RAG integration: TextCleaner (text cleaning), PDFParser (Docling parsing + OCR fallback + figure cropping + caption association), RAGIntegration (nodes→documents, parent/child chunking, Milvus indexing)
+│   │   ├── node_generator.py         # Node content generation factory: 6 type generators (Paragraph / Table / Figure / Formula / Caption / SectionHeader), table linearization to key=value format
+│   │   ├── retrieval.py              # Hybrid retriever: BM25 + Dense vector fusion (RRF), CrossEncoder reranking, parent chunk backtracking expansion, optional HyDE query expansion, Milvus filter expression building
+│   │   ├── factory.py                # Singleton factory: EmbeddingService / RerankerService / MilvusStoreFactory / VisionService (VLM figure analysis); visual query judgment heuristics
+│   │   ├── citation.py               # Citation extraction: CitationExtractor (extract paper/section/page citation metadata from retrieved documents and format)
+│   │   ├── cache.py                  # Retrieval cache: RetrievalCache (LRU cache based on OrderedDict, MD5 key hashing)
+│   │   └── incremental.py            # Incremental updates: IncrementalUpdater (delete/update Milvus parent & child collections by paper_id)
+│   │
+│   ├── eval/                         # Evaluation system
+│   │   ├── eval_retrieval.py         # Retrieval evaluation: Recall@k, Precision@k, MRR, MAP
+│   │   ├── eval_generation.py        # Generation evaluation: RAGAS metrics (Faithfulness / AnswerRelevancy / ContextPrecision / FactualCorrectness), end-to-end agent run and CSV report output
+│   │   └── benchmark/                # Evaluation benchmark datasets (.gitkeep)
+│   │
+│   ├── test/                         # Tests
+│   │   ├── test_agent.py             # End-to-end Agent test: initialize LLM + Retriever + Graph, run multi-turn conversation
+│   │   ├── test_retrieval.py         # Retrieval pipeline test: parse→chunk→index→multi-mode retrieval, structured log output
+│   │   ├── test_pdf_parser.py        # PDF parsing test
+│   │   ├── test_vlm.py              # VLM service unit test
+│   │   └── test_vlm_integration.py   # VLM integration test
+│   │
+│   ├── data/                         # Runtime data
+│   │   └── figures/                  # Extracted figure images (stored in paper_id subdirectories, PyMuPDF 2x DPI cropping)
+│   ├── uploads/                      # Uploaded PDF original files
+│   ├── db/                           # SQLite database files
+│   ├── log/                          # Runtime logs
+│   ├── config.py                     # Environment variable configuration: Milvus / LLM / VLM / Embedding / Reranker / PostgreSQL / Upload and all parameters
+│   ├── requirements.txt              # Python dependencies
+│   ├── Dockerfile                    # Backend container image
+│   └── .env.example                  # Environment variable template
+│
+├── frontend/                         # React frontend (Vite + TailwindCSS)
+│   ├── src/
+│   │   ├── main.jsx                  # React entry point (StrictMode mount)
+│   │   ├── App.jsx                   # Main layout component: manage sessions / messages / panels state, SSE streaming reception, session switching
+│   │   ├── api.js                    # API client: fetch + ReadableStream manual SSE parsing, AbortController cancellation support; encapsulates all backend interface calls
+│   │   ├── index.css                 # Global styles (TailwindCSS directives)
+│   │   └── components/               # UI components
+│   │       ├── Sidebar.jsx           # Sidebar: session list, new conversation, delete session
+│   │       ├── ChatMessages.jsx      # Message display: Markdown rendering (react-markdown), collapsible citation list
+│   │       ├── ChatInput.jsx         # Input box: adaptive height textarea, Enter to send
+│   │       ├── FileUpload.jsx        # File upload: drag-and-drop PDF upload, upload progress feedback
+│   │       └── SettingsPanel.jsx     # Settings panel: uploaded file list, clear database
+│   │
+│   ├── public/                       # Static assets
+│   │   └── vite.svg
+│   ├── index.html                    # HTML entry point
+│   ├── vite.config.js                # Vite configuration (dev server + build)
+│   ├── tailwind.config.js            # TailwindCSS configuration
+│   ├── postcss.config.js             # PostCSS configuration
+│   ├── eslint.config.js              # ESLint 9 configuration (React / Hooks / Refresh plugins)
+│   ├── nginx.conf                    # Nginx reverse proxy configuration (production deployment)
+│   ├── package.json                  # Node.js dependencies and scripts
+│   ├── package-lock.json
+│   ├── Dockerfile                    # Frontend container image (Nginx hosts build artifacts)
+│   └── README.md                     # Frontend documentation
+│
+├── doc/                              # Documentation resources
+│   ├── logo.png                      # Project logo
+│   ├── scholar_rag.png               # Architecture diagram
+│   ├── architecture.png              # Architecture diagram (backup)
+│   └── demo.gif                      # Demo GIF
+│
+├── resource/                         # Multimedia resources
+│   └── ScholarRAG.mp4                # Video
+│
+├── docker-compose.yml                # 4-service orchestration: backend(8000) + frontend(5173) + milvus(19530) + postgres(5432), with health checks and persistent volumes
+├── Makefile                          # Development shortcuts: install / dev / backend / frontend / build / docker-up / docker-down / lint / test / clean
+├── LICENSE                           # MIT open source license
+└── README.md                         # Project documentation
 ```
 
 ---
