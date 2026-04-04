@@ -61,6 +61,8 @@ This project is **beginner-friendly** and well-suited for anyone looking to lear
   - [Use](#use)
 - [🪩 API Reference](#-api-reference)
 - [📊 Evaluation](#-evaluation)
+  - [Evaluation Architecture](#evaluation-architecture)
+  - [Quick Reference](#quick-reference)
 - [🗝️ Tech Stack](#️-tech-stack)
   - [LLM Orchestration Layer]()
   - [Vector Database]()
@@ -75,7 +77,7 @@ This project is **beginner-friendly** and well-suited for anyone looking to lear
 - [⚠️ Security Notice](#️-security-notice)
 - [📝 License](#-license)
 - [🎉 Key Contributors](#-key-contributors)
-- [🎖️ Star History](#️-star-history)
+- [⭐️ Star History](#️-star-history)
 
 ---
 
@@ -155,7 +157,7 @@ scholar-rag/
 │   │   ├── test_agent.py             # End-to-end Agent test: initialize LLM + Retriever + Graph, run multi-turn conversation
 │   │   ├── test_retrieval.py         # Retrieval pipeline test: parse→chunk→index→multi-mode retrieval, structured log output
 │   │   ├── test_pdf_parser.py        # PDF parsing test
-│   │   ├── test_vlm.py              # VLM service unit test
+│   │   ├── test_vlm.py               # VLM service unit test
 │   │   └── test_vlm_integration.py   # VLM integration test
 │   │
 │   ├── data/                         # Runtime data
@@ -755,6 +757,6 @@ This project is open source and available under the [MIT License](./LICENSE).
 
 ---
 
-## 🎖️ Star History
+## ⭐️ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=PangHu1020/scholar-rag&type=Date)](https://www.star-history.com/#PangHu1020/scholar-rag&Date)
