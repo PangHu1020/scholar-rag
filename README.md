@@ -218,7 +218,9 @@ scholar-rag/
 - `Python 3.12+`
 - `Node.js 18+`
 - [Milvus 2.x](https://milvus.io/docs/install_standalone-docker.md) running on `localhost:19530`
+- `PostgreSQL` running (database is created automatically on first start)
 - A vLLM / Ollama / OpenAI-compatible LLM endpoint
+
 
 ### Configuration
 
@@ -268,30 +270,36 @@ HOST=0.0.0.0
 PORT=8000
 ```
 
-### Backend
+### Option 1: Docker (recommended)
 
 ```bash
-cd backend
-cp .env.example .env    # edit with your model paths and endpoints
-pip install -r requirements.txt
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+cp backend/.env.example backend/.env   # edit with your model endpoints
+docker-compose up -d
 ```
 
-### Frontend
+All services start automatically. Open http://localhost:8000
+
+### Option 2: Makefile
+
+Requires Milvus and Postgres running locally.
 
 ```bash
-cd frontend
-npm install
-npm run dev             # dev mode at http://localhost:5173
-# or
-npm run build           # production build, served by backend at /
+cp backend/.env.example backend/.env   # edit with your model endpoints
+make install                            # install all dependencies
+make start                              # build frontend + start backend at http://localhost:8000
+```
+
+For development (hot reload):
+
+```bash
+make dev                                # backend :8000 + frontend dev server :5173
 ```
 
 ### Use
 
-1. Open the app in your browser
+1. Open http://localhost:8000 in your browser
 2. Upload PDF papers via the upload panel
-3. Ask questions -- get cited answers in seconds
+3. Ask questions — get cited answers in seconds
 
 ---
 

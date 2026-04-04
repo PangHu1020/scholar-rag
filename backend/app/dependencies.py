@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import psycopg
 from fastapi import FastAPI
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -14,6 +15,24 @@ from rag.citation import CitationExtractor
 from rag.integration import PDFParser, RAGIntegration
 
 logger = logging.getLogger(__name__)
+
+
+async def _ensure_postgres_db():
+    """Create the database if it doesn't exist."""
+    uri = Config.POSTGRES_URI
+    # Connect to default 'postgres' db to create target db
+    idx = uri.rfind("/")
+    db_name = uri[idx + 1:]
+    base_uri = uri[:idx] + "/postgres"
+    try:
+        conn = await psycopg.AsyncConnection.connect(base_uri, autocommit=True)
+        async with conn:
+            cur = await conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
+            if not await cur.fetchone():
+                await conn.execute(f'CREATE DATABASE "{db_name}"')
+                logger.info(f"Created database: {db_name}")
+    except Exception as e:
+        logger.warning(f"Could not auto-create database: {e}")
 
 
 class RetrieverTool:
@@ -71,6 +90,8 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting up — loading models …")
 
+    await _ensure_postgres_db()
+
     _llm = ChatOpenAI(
         base_url=Config.LLM_BASE_URL,
         model=Config.LLM_MODEL,
@@ -88,7 +109,7 @@ async def lifespan(app: FastAPI):
     )
     _retriever_tool = RetrieverTool(_retriever)
 
-    _pdf_parser = PDFParser()
+    _pdf_parser = PDFParser(llm=_llm)
     _rag_integration = RAGIntegration(
         embedding_model=Config.EMBEDDING_MODEL,
         milvus_uri=Config.MILVUS_URI,
