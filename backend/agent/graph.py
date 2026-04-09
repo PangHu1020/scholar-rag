@@ -12,6 +12,7 @@ from .nodes import (
     analyze_query,
     classify_query,
     prepare_synthesis,
+    synthesize,
     summarize_conversation,
     retrieve,
     generate,
@@ -107,17 +108,22 @@ def build_graph(
 
     graph = StateGraph(AgentState)
 
+    async def synthesize_node(state: AgentState) -> dict:
+        return await synthesize(state, llm=llm)
+
     graph.add_node("summarize", summarize_node)
     graph.add_node("classify", classify_node)
     graph.add_node("analyze", analyze_node)
     graph.add_node("sub_agent", sub_agent_node)
     graph.add_node("prepare_synthesis", prepare_synthesis)
+    graph.add_node("synthesize", synthesize_node)
 
     graph.add_edge(START, "summarize")
     graph.add_edge("summarize", "classify")
     graph.add_edge("classify", "analyze")
     graph.add_conditional_edges("analyze", dispatch, ["sub_agent"])
     graph.add_edge("sub_agent", "prepare_synthesis")
-    graph.add_edge("prepare_synthesis", END)
+    graph.add_edge("prepare_synthesis", "synthesize")
+    graph.add_edge("synthesize", END)
 
     return graph.compile(checkpointer=checkpointer)

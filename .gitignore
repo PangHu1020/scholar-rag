@@ -42,6 +42,7 @@ benchmark/
 .pytest_cache/
 .coverage
 htmlcov/
+test_oureval_full.py
 
 # IDE
 .vscode/

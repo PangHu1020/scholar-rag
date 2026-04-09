@@ -1,15 +1,68 @@
 """Retrieval evaluation: dataset-agnostic core functions.
 
-Test case format:
-    {"query": str, "relevant_ids": list[str]}          # chunk_id based (custom datasets)
-    {"query": str, "relevant_pages": list[int], ...}   # page based (MMDocIR)
+Test case formats:
+    1. Chunk ID matching (legacy, not recommended):
+       {"query": str, "relevant_ids": list[str]}
+    
+    2. LLM-based answer matching (recommended for custom datasets):
+       {"query": str, "reference_answer": str}
+       Use with hit_fn=is_hit_answer for chunk-agnostic evaluation.
+    
+    3. Page-based matching (MMDocIR):
+       {"query": str, "relevant_pages": list[int], "paper_id": str, ...}
+       Use with hit_fn=is_hit_page from mmdocir_adapter.
 
-For MMDocIR, pass a hit_fn that maps (doc_metadata, case) -> bool.
+For custom hit functions, signature: hit_fn(doc: Document, case: dict) -> bool
 """
 
 from typing import Callable, Optional
 from langchain_core.documents import Document
 from rag.retrieval import Retriever
+
+
+def is_hit_answer(doc: Document, case: dict, llm=None) -> bool:
+    """LLM-based hit function: check if retrieved chunk contains info to answer the query.
+    
+    Args:
+        doc: Retrieved document with page_content and metadata.
+        case: Test case with "query" and "reference_answer".
+        llm: LangChain LLM for evaluation (defaults to Config LLM).
+    
+    Returns:
+        True if the chunk contains information needed to answer the query.
+    """
+    from langchain_openai import ChatOpenAI
+    from config import Config
+    
+    _llm = llm or ChatOpenAI(
+        base_url=Config.LLM_BASE_URL,
+        model=Config.LLM_MODEL,
+        api_key=Config.LLM_API_KEY,
+        temperature=0,
+    )
+    
+    query = case.get("query", "")
+    reference = case.get("reference_answer", "")
+    chunk_text = doc.page_content
+    
+    prompt = f"""Given a query and a reference answer, determine if the provided text chunk contains sufficient information to answer the query.
+
+Query: {query}
+
+Reference Answer: {reference}
+
+Text Chunk:
+{chunk_text}
+
+Does this chunk contain information that would help answer the query? Consider:
+1. Does it contain key facts mentioned in the reference answer?
+2. Does it provide relevant context for answering the query?
+3. Could someone use this chunk to formulate a correct answer?
+
+Answer only "yes" or "no"."""
+    
+    response = _llm.invoke(prompt).content.strip().lower()
+    return "yes" in response
 
 
 def calculate_metrics(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> dict:
@@ -73,6 +126,7 @@ def evaluate_retrieval(
     k: int = 5,
     fetch_k: int = 20,
     hit_fn: Optional[Callable[[dict, dict], bool]] = None,
+    llm = None,
     verbose: bool = False,
 ) -> dict:
     """Evaluate retrieval on test cases.
@@ -84,8 +138,9 @@ def evaluate_retrieval(
             - any fields consumed by hit_fn
         k: Top-k for metrics.
         fetch_k: Candidates before reranking.
-        hit_fn: Optional callable(doc_metadata, case) -> bool.
+        hit_fn: Optional callable(doc: Document, case: dict) -> bool.
                 When provided, used instead of chunk_id matching.
+        llm: LangChain LLM for hit_fn evaluation (if hit_fn needs it).
         verbose: Print per-query details.
 
     Returns:
@@ -100,9 +155,17 @@ def evaluate_retrieval(
         )
 
         if hit_fn is not None:
-            hits = [hit_fn(doc.metadata, case) for doc in results]
-            num_relevant = len(case.get("relevant_pages", case.get("relevant_layouts", [1])))
-            num_relevant = max(num_relevant, 1)
+            if hit_fn == is_hit_answer:
+                hits = [hit_fn(doc, case, llm=llm) for doc in results]
+            else:
+                hits = [hit_fn(doc, case) for doc in results]
+            if "relevant_pages" in case or "relevant_layouts" in case:
+                num_relevant = len(case.get("relevant_pages", case.get("relevant_layouts", [])))
+                num_relevant = max(num_relevant, 1)
+            else:
+                # For answer-based evaluation without ground truth count,
+                # assume we need at least k/2 relevant docs (or min 2)
+                num_relevant = max(k // 2, 2)
             metrics = calculate_metrics_from_hits(hits, num_relevant, k)
         else:
             relevant_ids = case.get("relevant_ids", [])
@@ -124,11 +187,11 @@ def evaluate_retrieval(
     if n == 0:
         return {"recall@k": 0.0, "precision@k": 0.0, "mrr": 0.0, "map": 0.0, "num_queries": 0}
 
-    from eval.eval_utils import avg
+    def _avg(vals): return sum(vals) / len(vals) if vals else 0.0
     return {
-        f"recall@{k}": avg([m["recall"] for m in all_metrics]),
-        f"precision@{k}": avg([m["precision"] for m in all_metrics]),
-        "mrr": avg([m["mrr"] for m in all_metrics]),
-        "map": avg([m["ap"] for m in all_metrics]),
+        f"recall@{k}": _avg([m["recall"] for m in all_metrics]),
+        f"precision@{k}": _avg([m["precision"] for m in all_metrics]),
+        "mrr": _avg([m["mrr"] for m in all_metrics]),
+        "map": _avg([m["ap"] for m in all_metrics]),
         "num_queries": n,
     }

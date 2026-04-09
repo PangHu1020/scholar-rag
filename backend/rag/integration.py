@@ -610,6 +610,12 @@ class RAGIntegration:
         for doc in docs:
             chunk_parent_id = str(uuid.uuid4())
             doc.metadata["chunk_id"] = chunk_parent_id
+            if "bbox" not in doc.metadata:
+                doc.metadata["bbox"] = ""
+            if "image_path" not in doc.metadata:
+                doc.metadata["image_path"] = ""
+            if "vlm_description" not in doc.metadata:
+                doc.metadata["vlm_description"] = ""
             parents.append(doc)
             
             node_type = doc.metadata.get("node_type", "")
@@ -620,12 +626,24 @@ class RAGIntegration:
                 for i, split in enumerate(splits):
                     split.metadata["chunk_parent_id"] = chunk_parent_id
                     split.metadata["chunk_id"] = f"{chunk_parent_id}_child_{i}"
+                    if "bbox" not in split.metadata:
+                        split.metadata["bbox"] = ""
+                    if "image_path" not in split.metadata:
+                        split.metadata["image_path"] = ""
+                    if "vlm_description" not in split.metadata:
+                        split.metadata["vlm_description"] = ""
                     children.append(split)
             else:
                 child = Document(
                     page_content=doc.page_content,
                     metadata={**doc.metadata, "chunk_parent_id": chunk_parent_id, "chunk_id": f"{chunk_parent_id}_child_0"}
                 )
+                if "bbox" not in child.metadata:
+                    child.metadata["bbox"] = ""
+                if "image_path" not in child.metadata:
+                    child.metadata["image_path"] = ""
+                if "vlm_description" not in child.metadata:
+                    child.metadata["vlm_description"] = ""
                 children.append(child)
         
         return parents, children
@@ -660,34 +678,5 @@ class RAGIntegration:
             print(f"Error storing in Milvus: {e}")
             return False
 
-    async def store_in_milvus_async(self, parents: list[Document], children: list[Document]) -> bool:
-        """Async version of store_in_milvus using aadd_documents."""
-        if not parents or not children:
-            return False
-
-        bm25 = BM25BuiltInFunction(input_field_names="text", output_field_names="sparse")
-
-        try:
-            child_store = Milvus(
-                embedding_function=self.embeddings,
-                builtin_function=bm25,
-                vector_field=["dense", "sparse"],
-                collection_name=f"{self.collection_name}_children",
-                connection_args={"uri": self.milvus_uri},
-            )
-            await child_store.aadd_documents(children)
-
-            parent_store = Milvus(
-                embedding_function=self.embeddings,
-                builtin_function=bm25,
-                vector_field=["dense", "sparse"],
-                collection_name=f"{self.collection_name}_parents",
-                connection_args={"uri": self.milvus_uri},
-            )
-            await parent_store.aadd_documents(parents)
-            return True
-        except Exception as e:
-            print(f"Error storing in Milvus (async): {e}")
-            return False
 
 

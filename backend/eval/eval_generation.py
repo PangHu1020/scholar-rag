@@ -3,63 +3,75 @@
 import time
 import warnings
 import logging
-from pathlib import Path
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+logging.getLogger("langchain_milvus").setLevel(logging.ERROR)
 
 from ragas.dataset_schema import SingleTurnSample, EvaluationDataset
 from ragas import evaluate as ragas_evaluate
 from ragas.metrics import Faithfulness, AnswerRelevancy, ContextPrecision, FactualCorrectness
 from ragas.llms import LangchainLLMWrapper
 from ragas.embeddings import LangchainEmbeddingsWrapper
-from langchain_huggingface import HuggingFaceEmbeddings
 
 from config import Config
+from rag.factory import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_METRICS = [Faithfulness(), AnswerRelevancy(), ContextPrecision(), FactualCorrectness()]
+DEFAULT_METRICS = [Faithfulness(), AnswerRelevancy(), FactualCorrectness()]
 
 
 def collect_samples(graph, eval_cases: list[dict], verbose: bool = True) -> list[SingleTurnSample]:
     """Run the agent graph on eval_cases and collect RAGAS samples.
 
-    Each case must have "query"; optionally "reference" for FactualCorrectness.
+    Each case must have "query"; optionally "reference" or "reference_answer" for FactualCorrectness.
     """
-    samples = []
-    for i, case in enumerate(eval_cases, 1):
-        query = case["query"]
-        if verbose:
-            print(f"\n[{i}/{len(eval_cases)}] {query}")
+    import asyncio
 
-        t0 = time.time()
-        result = graph.invoke({
-            "query": query,
-            "messages": [],
-            "summary": "",
-            "documents": [],
-            "sub_queries": [],
-            "sub_answers": [],
-            "answer": "",
-            "citations": [],
-        })
-        elapsed = time.time() - t0
+    async def _run_all():
+        samples = []
+        for i, case in enumerate(eval_cases, 1):
+            query = case["query"]
+            reference = case.get("reference") or case.get("reference_answer")
+            if verbose:
+                print(f"\n[{i}/{len(eval_cases)}] {query}")
 
-        answer = result.get("answer", "")
-        contexts = [sa["answer"] for sa in result.get("sub_answers", []) if sa.get("answer")]
+            t0 = time.time()
+            result = await graph.ainvoke({
+                "query": query,
+                "messages": [],
+                "summary": "",
+                "documents": [],
+                "sub_queries": [],
+                "sub_answers": [],
+                "answer": "",
+                "citations": [],
+            })
+            elapsed = time.time() - t0
 
-        if verbose:
-            print(f"  {elapsed:.1f}s | sub-queries={len(result.get('sub_answers', []))} | contexts={len(contexts)}")
-            print(f"  {answer[:120]}...")
+            answer = result.get("answer", "")
+            sub_answers = result.get("sub_answers", [])
 
-        samples.append(SingleTurnSample(
-            user_input=query,
-            response=answer,
-            retrieved_contexts=contexts if contexts else [answer],
-            reference=case.get("reference"),
-        ))
+            # Collect retrieved contexts from each sub-agent's documents
+            contexts = []
+            for sa in sub_answers:
+                for doc in sa.get("documents", []):
+                    if isinstance(doc, str) and doc.strip():
+                        contexts.append(doc)
 
-    return samples
+            if verbose:
+                print(f"  {elapsed:.1f}s | sub-queries={len(sub_answers)} | contexts={len(contexts)}")
+                print(f"  {answer[:120]}...")
+
+            samples.append(SingleTurnSample(
+                user_input=query,
+                response=answer,
+                retrieved_contexts=contexts or [""],
+                reference=reference,
+            ))
+        return samples
+
+    return asyncio.run(_run_all())
 
 
 def evaluate_generation(
@@ -89,7 +101,7 @@ def evaluate_generation(
 
     evaluator_llm = LangchainLLMWrapper(_llm)
     evaluator_embeddings = LangchainEmbeddingsWrapper(
-        HuggingFaceEmbeddings(model_name=Config.EMBEDDING_MODEL)
+        EmbeddingService.get_embeddings(Config.EMBEDDING_MODEL)
     )
 
     dataset = EvaluationDataset(samples=samples)

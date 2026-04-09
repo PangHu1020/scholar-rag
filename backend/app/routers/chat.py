@@ -43,39 +43,42 @@ async def _stream_response(graph, query: str, session_id: str) -> AsyncGenerator
     yield json.dumps({"type": "status", "data": "analyzing"})
 
     try:
-        synth_msgs = []
         final_citations = []
-
-        async for chunk in graph.astream(graph_input, config=config, stream_mode="updates"):
-            for node_name, node_output in chunk.items():
-                if node_name == "analyze":
-                    sq = node_output.get("sub_queries", [])
-                    if sq:
-                        yield json.dumps({"type": "sub_queries", "data": sq})
-                        yield json.dumps({"type": "status", "data": "searching"})
-
-                if node_name == "prepare_synthesis":
-                    synth_msgs = node_output.get("synth_messages", [])
-                    final_citations = node_output.get("citations", [])
-                    logger.info(f"prepare_synthesis: {len(final_citations)} citations")
-
-        llm = get_llm()
+        final_answer = ""
         answer_buf = ""
-        if synth_msgs:
-            async for token in llm.astream(synth_msgs):
-                if token.content:
-                    answer_buf += token.content
+
+        async for chunk in graph.astream(graph_input, config=config, stream_mode=["updates", "messages"]):
+            stream_type, data = chunk
+
+            if stream_type == "updates":
+                for node_name, node_output in data.items():
+                    if node_name == "analyze":
+                        sq = node_output.get("sub_queries", [])
+                        if sq:
+                            yield json.dumps({"type": "sub_queries", "data": sq})
+                            yield json.dumps({"type": "status", "data": "searching"})
+
+                    if node_name == "prepare_synthesis":
+                        final_citations = node_output.get("citations", [])
+                        logger.info(f"prepare_synthesis: {len(final_citations)} citations")
+
+            elif stream_type == "messages":
+                msg, metadata = data
+                if metadata.get("langgraph_node") == "synthesize" and hasattr(msg, "content") and msg.content:
+                    answer_buf += msg.content
                     yield json.dumps({"type": "answer", "data": answer_buf})
 
-        if not answer_buf:
+        final_answer = answer_buf
+
+        if not final_answer:
             yield json.dumps({"type": "answer", "data": ""})
 
         await graph.aupdate_state(config, {
             "messages": [
                 HumanMessage(content=query),
-                AIMessage(content=answer_buf, additional_kwargs={"citations": final_citations}),
+                AIMessage(content=final_answer, additional_kwargs={"citations": final_citations}),
             ],
-            "answer": answer_buf,
+            "answer": final_answer,
         })
 
         yield json.dumps({"type": "citations", "data": final_citations})

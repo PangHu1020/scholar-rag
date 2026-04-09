@@ -133,6 +133,17 @@ def prepare_synthesis(state: AgentState) -> dict:
     }
 
 
+async def synthesize(state: AgentState, llm: BaseChatModel) -> dict:
+    synth_messages = state.get("synth_messages", [])
+    if not synth_messages:
+        return {"answer": ""}
+    chunks = []
+    async for chunk in llm.astream(synth_messages):
+        if chunk.content:
+            chunks.append(chunk.content)
+    return {"answer": "".join(chunks)}
+
+
 async def summarize_conversation(state: AgentState, llm: BaseChatModel) -> dict:
     messages = state.get("messages", [])
     existing_summary = state.get("summary", "")
@@ -174,8 +185,14 @@ async def summarize_conversation(state: AgentState, llm: BaseChatModel) -> dict:
 
 async def retrieve(state: SubAgentState, retriever, citation_extractor) -> dict:
     from rag.factory import is_visual_query
+    import asyncio
+
     query = state["query"]
+    retry_queries = state.get("retry_queries", [])
     query_type = state.get("query_type", "general")
+
+    # On retry, use all retry_queries concurrently; otherwise just the main query
+    queries = retry_queries if retry_queries else [query]
 
     _ROUTE_CONFIG: dict[str, list[str] | None] = {
         "experimental_result": ["experiment"],
@@ -185,11 +202,27 @@ async def retrieve(state: SubAgentState, retriever, citation_extractor) -> dict:
     }
     section_type_filter = _ROUTE_CONFIG.get(query_type)
 
-    docs: list[Document] = retriever.invoke(query, section_type_filter=section_type_filter)
+    def _invoke(q: str) -> list[Document]:
+        docs = retriever.invoke(q, section_type_filter=section_type_filter)
+        if not docs and section_type_filter:
+            docs = retriever.invoke(q, section_type_filter=None)
+        return docs
 
-    if not docs and section_type_filter:
-        logger.info(f"No results with section filter, retrying without filter")
-        docs = retriever.invoke(query, section_type_filter=None)
+    # Concurrent retrieval for multiple queries
+    loop = asyncio.get_event_loop()
+    results = await asyncio.gather(*[
+        loop.run_in_executor(None, _invoke, q) for q in queries
+    ])
+
+    # Deduplicate by chunk_id, preserve order
+    seen_ids: set[str] = set()
+    docs: list[Document] = []
+    for batch in results:
+        for doc in batch:
+            cid = doc.metadata.get("chunk_id", id(doc))
+            if cid not in seen_ids:
+                seen_ids.add(cid)
+                docs.append(doc)
 
     citations = citation_extractor.extract_all(docs) if docs else []
     documents = []
@@ -208,7 +241,7 @@ async def retrieve(state: SubAgentState, retriever, citation_extractor) -> dict:
     needs_vlm = is_visual_query(query) and has_figure
 
     truncated = query[:50] + ("..." if len(query) > 50 else "")
-    logger.info(f"Retrieved {len(documents)} docs for: {truncated} | needs_vlm={needs_vlm}")
+    logger.info(f"Retrieved {len(documents)} docs for: {truncated} (queries={len(queries)}) | needs_vlm={needs_vlm}")
     return {"documents": documents, "citations": citations, "needs_vlm": needs_vlm}
 
 
@@ -334,5 +367,5 @@ def should_retry(state: SubAgentState, max_retries: int = 2) -> str:
 
 def prepare_retry(state: SubAgentState) -> dict:
     retry_queries = state.get("retry_queries", [])
-    query = retry_queries[-1] if retry_queries else state["query"]
+    query = retry_queries[0] if retry_queries else state["query"]
     return {"query": query}

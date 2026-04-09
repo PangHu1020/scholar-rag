@@ -78,7 +78,7 @@ This project is **beginner-friendly** and well-suited for anyone looking to lear
 - [🎖️ Star History](#️-star-history)
 
 ---
-:gear:
+
 ## 🗞️ Features
 
 <!-- TODO: replace with actual screenshot or GIF -->
@@ -155,7 +155,7 @@ scholar-rag/
 │   │   ├── test_agent.py             # End-to-end Agent test: initialize LLM + Retriever + Graph, run multi-turn conversation
 │   │   ├── test_retrieval.py         # Retrieval pipeline test: parse→chunk→index→multi-mode retrieval, structured log output
 │   │   ├── test_pdf_parser.py        # PDF parsing test
-│   │   ├── test_vlm.py              # VLM service unit test
+│   │   ├── test_vlm.py               # VLM service unit test
 │   │   └── test_vlm_integration.py   # VLM integration test
 │   │
 │   ├── data/                         # Runtime data

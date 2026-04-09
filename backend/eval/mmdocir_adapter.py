@@ -100,8 +100,16 @@ def iou(bbox_a: list, bbox_b: list) -> float:
     return inter / (area_a + area_b - inter)
 
 
-def is_hit_page(doc_metadata: dict, case: dict) -> bool:
-    """Check if a retrieved document is from the correct paper and covers a relevant page."""
+def is_hit_page(doc, case: dict) -> bool:
+    """Check if a retrieved document is from the correct paper and covers a relevant page.
+    
+    Args:
+        doc: Document object or dict with metadata.
+        case: Test case with "paper_id" and "relevant_pages".
+    """
+    from langchain_core.documents import Document
+    doc_metadata = doc.metadata if isinstance(doc, Document) else doc
+    
     if doc_metadata.get("paper_id") != case.get("paper_id"):
         return False
     page_num = doc_metadata.get("page_num")
@@ -110,8 +118,17 @@ def is_hit_page(doc_metadata: dict, case: dict) -> bool:
     return (page_num - 1) in case["relevant_pages"]
 
 
-def is_hit_layout(doc_metadata: dict, case: dict, iou_threshold: float = 0.3) -> bool:
-    """Check if a retrieved document is from the correct paper and bbox overlaps ground truth."""
+def is_hit_layout(doc, case: dict, iou_threshold: float = 0.3) -> bool:
+    """Check if a retrieved document is from the correct paper and bbox overlaps ground truth.
+    
+    Args:
+        doc: Document object or dict with metadata.
+        case: Test case with "paper_id" and "relevant_layouts".
+        iou_threshold: Minimum IoU to consider a hit.
+    """
+    from langchain_core.documents import Document
+    doc_metadata = doc.metadata if isinstance(doc, Document) else doc
+    
     if doc_metadata.get("paper_id") != case.get("paper_id"):
         return False
     page_num = doc_metadata.get("page_num")
