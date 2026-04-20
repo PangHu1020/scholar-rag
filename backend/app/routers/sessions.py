@@ -14,12 +14,12 @@ router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
 @router.get("")
 async def get_sessions():
-    return list_sessions()
+    return await list_sessions()
 
 
 @router.get("/{session_id}")
 async def get_session_detail(session_id: str):
-    session = get_session(session_id)
+    session = await get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return session
@@ -27,7 +27,7 @@ async def get_session_detail(session_id: str):
 
 @router.get("/{session_id}/history")
 async def get_history(session_id: str):
-    session = get_session(session_id)
+    session = await get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -54,7 +54,13 @@ async def get_history(session_id: str):
 
 @router.delete("/{session_id}")
 async def remove_session(session_id: str):
-    ok = delete_session(session_id)
+    ok = await delete_session(session_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        await get_checkpointer().adelete_thread(session_id)
+    except Exception as e:
+        logger.warning(f"Failed to clean checkpoint for {session_id}: {e}")
+
     return {"ok": True}

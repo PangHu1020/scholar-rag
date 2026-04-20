@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import psycopg
+from psycopg_pool import AsyncConnectionPool
 from fastapi import FastAPI
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -13,6 +14,7 @@ from config import Config
 from rag.retrieval import Retriever
 from rag.citation import CitationExtractor
 from rag.integration import PDFParser, RAGIntegration
+from app.store import init_store
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +94,10 @@ async def lifespan(app: FastAPI):
 
     await _ensure_postgres_db()
 
+    pool = AsyncConnectionPool(Config.POSTGRES_URI, min_size=2, max_size=10)
+    await pool.open()
+    await init_store(pool)
+
     _llm = ChatOpenAI(
         base_url=Config.LLM_BASE_URL,
         model=Config.LLM_MODEL,
@@ -126,4 +132,5 @@ async def lifespan(app: FastAPI):
         yield
 
     _checkpointer = None
+    await pool.close()
     logger.info("Shutting down.")

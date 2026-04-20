@@ -9,6 +9,7 @@ from pymilvus import connections, utility
 
 from config import Config
 from app.store import clear_all_files
+from app.dependencies import get_retriever
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["management"])
@@ -27,6 +28,12 @@ async def clear_collection():
                 dropped.append(name)
         connections.disconnect(alias)
 
+        # Invalidate retriever store caches
+        retriever = get_retriever()
+        for store in (retriever._child_store, retriever._parent_store):
+            store._col_cache = None
+            store._cache_key = None
+
         # Clear all uploaded PDFs
         upload_dir = Path(Config.UPLOAD_DIR)
         if upload_dir.exists():
@@ -40,7 +47,7 @@ async def clear_collection():
             shutil.rmtree(figures_dir)
 
         # Clear file records from store
-        clear_all_files()
+        await clear_all_files()
 
         return {"ok": True, "dropped": dropped}
     except Exception as e:

@@ -67,12 +67,22 @@ class Retriever:
             node_type_filter: Restrict search to specific node types (e.g. ['table','figure']).
             section_type_filter: Restrict search to specific section types (e.g. ['method','experiment']).
         """
+        # Invalidate col cache in case collection was dropped
+        self._child_store._col_cache = None
+        self._child_store._cache_key = None
+        self._parent_store._col_cache = None
+        self._parent_store._cache_key = None
+
+        if self._child_store.col is None:
+            logger.warning("Collection not found, no documents indexed yet.")
+            return []
+
         if self.cache:
             cached = self.cache.get(query)
             if cached is not None:
                 logger.debug(f"Cache hit for query: {query[:50]}...")
                 return cached
-        
+
         search_query = self._hyde(query) if use_hyde and self.llm else query
         expr = self._build_expr(node_type_filter, section_type_filter)
 

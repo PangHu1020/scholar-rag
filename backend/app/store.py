@@ -1,149 +1,155 @@
-"""Session metadata storage using SQLite (file-based, zero config)."""
+"""Session & file metadata storage using PostgreSQL."""
 
-import sqlite3
 import time
-from pathlib import Path
 from typing import Optional
 
+from psycopg_pool import AsyncConnectionPool
 
-DB_PATH = Path(__file__).parent.parent / "db" / "sessions.db"
+_pool: Optional[AsyncConnectionPool] = None
 
+_SESSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    created_at DOUBLE PRECISION NOT NULL,
+    updated_at DOUBLE PRECISION NOT NULL
+)"""
 
-def _get_conn() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS sessions (
-            session_id TEXT PRIMARY KEY,
-            title TEXT NOT NULL DEFAULT '',
-            created_at REAL NOT NULL,
-            updated_at REAL NOT NULL
-        )"""
-    )
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS files (
-            file_id TEXT PRIMARY KEY,
-            filename TEXT NOT NULL,
-            paper_id TEXT NOT NULL,
-            content_hash TEXT NOT NULL DEFAULT '',
-            size_bytes INTEGER NOT NULL DEFAULT 0,
-            page_count INTEGER NOT NULL DEFAULT 0,
-            chunk_count INTEGER NOT NULL DEFAULT 0,
-            created_at REAL NOT NULL
-        )"""
-    )
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(files)").fetchall()}
-    if "content_hash" not in cols:
-        conn.execute("ALTER TABLE files ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")
-
-    conn.commit()
-    return conn
+_FILES_DDL = """
+CREATE TABLE IF NOT EXISTS files (
+    file_id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    paper_id TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL DEFAULT 0,
+    page_count INTEGER NOT NULL DEFAULT 0,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    created_at DOUBLE PRECISION NOT NULL
+)"""
 
 
-def create_session(session_id: str, title: str = "") -> dict:
+async def init_store(pool: AsyncConnectionPool):
+    global _pool
+    _pool = pool
+    async with pool.connection() as conn:
+        await conn.execute(_SESSIONS_DDL)
+        await conn.execute(_FILES_DDL)
+        await conn.commit()
+
+
+def _get_pool() -> AsyncConnectionPool:
+    assert _pool is not None, "store not initialised — call init_store first"
+    return _pool
+
+
+# ── sessions ─────────────────────────────────────────────
+
+async def create_session(session_id: str, title: str = "") -> dict:
     now = time.time()
-    conn = _get_conn()
-    conn.execute(
-        "INSERT OR IGNORE INTO sessions (session_id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        (session_id, title, now, now),
-    )
-    conn.commit()
-    conn.close()
+    async with _get_pool().connection() as conn:
+        await conn.execute(
+            "INSERT INTO sessions (session_id, title, created_at, updated_at) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (session_id) DO NOTHING",
+            (session_id, title, now, now),
+        )
+        await conn.commit()
     return {"session_id": session_id, "title": title, "created_at": now, "updated_at": now}
 
 
-def update_session(session_id: str, title: Optional[str] = None) -> bool:
-    conn = _get_conn()
-    parts, vals = ["updated_at = ?"], [time.time()]
+async def update_session(session_id: str, title: Optional[str] = None) -> bool:
+    parts, vals = ["updated_at = %s"], [time.time()]
     if title is not None:
-        parts.append("title = ?")
+        parts.append("title = %s")
         vals.append(title)
     vals.append(session_id)
-    cur = conn.execute(f"UPDATE sessions SET {', '.join(parts)} WHERE session_id = ?", vals)
-    conn.commit()
-    ok = cur.rowcount > 0
-    conn.close()
-    return ok
+    async with _get_pool().connection() as conn:
+        cur = await conn.execute(
+            f"UPDATE sessions SET {', '.join(parts)} WHERE session_id = %s", vals
+        )
+        await conn.commit()
+        return cur.rowcount > 0
 
 
-def list_sessions() -> list[dict]:
-    conn = _get_conn()
-    rows = conn.execute("SELECT * FROM sessions ORDER BY updated_at DESC").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+async def list_sessions() -> list[dict]:
+    async with _get_pool().connection() as conn:
+        cur = await conn.execute("SELECT * FROM sessions ORDER BY updated_at DESC")
+        cols = [d.name for d in cur.description]
+        return [dict(zip(cols, row)) for row in await cur.fetchall()]
 
 
-def get_session(session_id: str) -> Optional[dict]:
-    conn = _get_conn()
-    row = conn.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+async def get_session(session_id: str) -> Optional[dict]:
+    async with _get_pool().connection() as conn:
+        cur = await conn.execute("SELECT * FROM sessions WHERE session_id = %s", (session_id,))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        cols = [d.name for d in cur.description]
+        return dict(zip(cols, row))
 
 
-def delete_session(session_id: str) -> bool:
-    conn = _get_conn()
-    cur = conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
-    conn.commit()
-    ok = cur.rowcount > 0
-    conn.close()
-    return ok
+async def delete_session(session_id: str) -> bool:
+    async with _get_pool().connection() as conn:
+        cur = await conn.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
+        await conn.commit()
+        return cur.rowcount > 0
 
 
-def add_file(file_id: str, filename: str, paper_id: str, content_hash: str = "",
-             size_bytes: int = 0, page_count: int = 0, chunk_count: int = 0) -> dict:
+# ── files ────────────────────────────────────────────────
+
+async def add_file(
+    file_id: str, filename: str, paper_id: str,
+    size_bytes: int = 0, page_count: int = 0, chunk_count: int = 0,
+) -> dict:
     now = time.time()
-    conn = _get_conn()
-    conn.execute(
-        "INSERT OR REPLACE INTO files (file_id, filename, paper_id, content_hash, size_bytes, page_count, chunk_count, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (file_id, filename, paper_id, content_hash, size_bytes, page_count, chunk_count, now),
-    )
-    conn.commit()
-    conn.close()
-    return {"file_id": file_id, "filename": filename, "paper_id": paper_id,
-            "content_hash": content_hash, "size_bytes": size_bytes,
-            "page_count": page_count, "chunk_count": chunk_count, "created_at": now}
+    async with _get_pool().connection() as conn:
+        await conn.execute(
+            "INSERT INTO files (file_id, filename, paper_id, size_bytes, page_count, chunk_count, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (file_id) DO UPDATE SET "
+            "filename=EXCLUDED.filename, paper_id=EXCLUDED.paper_id, "
+            "size_bytes=EXCLUDED.size_bytes, page_count=EXCLUDED.page_count, "
+            "chunk_count=EXCLUDED.chunk_count",
+            (file_id, filename, paper_id, size_bytes, page_count, chunk_count, now),
+        )
+        await conn.commit()
+    return {
+        "file_id": file_id, "filename": filename, "paper_id": paper_id,
+        "size_bytes": size_bytes, "page_count": page_count,
+        "chunk_count": chunk_count, "created_at": now,
+    }
 
 
-def list_files() -> list[dict]:
-    conn = _get_conn()
-    rows = conn.execute("SELECT * FROM files ORDER BY created_at DESC").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+async def list_files() -> list[dict]:
+    async with _get_pool().connection() as conn:
+        cur = await conn.execute("SELECT * FROM files ORDER BY created_at DESC")
+        cols = [d.name for d in cur.description]
+        return [dict(zip(cols, row)) for row in await cur.fetchall()]
 
 
-def get_file(file_id: str) -> Optional[dict]:
-    conn = _get_conn()
-    row = conn.execute("SELECT * FROM files WHERE file_id = ?", (file_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+async def get_file(file_id: str) -> Optional[dict]:
+    async with _get_pool().connection() as conn:
+        cur = await conn.execute("SELECT * FROM files WHERE file_id = %s", (file_id,))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        cols = [d.name for d in cur.description]
+        return dict(zip(cols, row))
 
 
-def get_file_by_hash(content_hash: str) -> Optional[dict]:
-    conn = _get_conn()
-    row = conn.execute("SELECT * FROM files WHERE content_hash = ?", (content_hash,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+async def delete_file_record(file_id: str) -> Optional[dict]:
+    async with _get_pool().connection() as conn:
+        cur = await conn.execute("SELECT * FROM files WHERE file_id = %s", (file_id,))
+        row = await cur.fetchone()
+        if not row:
+            return None
+        cols = [d.name for d in cur.description]
+        record = dict(zip(cols, row))
+        await conn.execute("DELETE FROM files WHERE file_id = %s", (file_id,))
+        await conn.commit()
+        return record
 
 
-def delete_file_record(file_id: str) -> Optional[dict]:
-    conn = _get_conn()
-    row = conn.execute("SELECT * FROM files WHERE file_id = ?", (file_id,)).fetchone()
-    if not row:
-        conn.close()
-        return None
-    conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
-    conn.commit()
-    conn.close()
-    return dict(row)
-
-
-def clear_all_files() -> int:
-    """Delete all file records. Returns number of deleted rows."""
-    conn = _get_conn()
-    cur = conn.execute("DELETE FROM files")
-    conn.commit()
-    count = cur.rowcount
-    conn.close()
-    return count
+async def clear_all_files() -> int:
+    async with _get_pool().connection() as conn:
+        cur = await conn.execute("DELETE FROM files")
+        await conn.commit()
+        return cur.rowcount

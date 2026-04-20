@@ -570,14 +570,15 @@ class RAGIntegration:
             separators=["\n\n", "\n", ".","?", "!", ";", " "]
         )
     
-    def nodes_to_documents(self, nodes: list[PaperNode]) -> list[Document]:
+    def nodes_to_documents(self, nodes: list[PaperNode], content_hash: str = "") -> list[Document]:
         """Convert PaperNodes to LangChain Documents."""
         docs = []
         for node in nodes:
             if not node.text.strip():
                 continue
-            
-            metadata = {
+
+            metadata = {k: v for k, v in node.metadata.items() if k != "item"}
+            metadata.update({
                 "node_id": node.node_id,
                 "paper_id": node.paper_id,
                 "node_type": node.node_type,
@@ -585,17 +586,12 @@ class RAGIntegration:
                 "order": node.order,
                 "section_path": " > ".join(node.section_path) if node.section_path else "",
                 "section_type": node.metadata.get("section_type", "other"),
-            }
-            if node.bbox:
-                metadata["bbox"] = str(node.bbox)
-            if node.parent_id:
-                metadata["node_parent_id"] = node.parent_id
-            if node.image_path:
-                metadata["image_path"] = node.image_path
-            # vlm_description starts empty; populated lazily at query time
-            metadata["vlm_description"] = node.metadata.get("vlm_description", "")
-
-            metadata.update({k: v for k, v in node.metadata.items() if k != "item"})
+                "content_hash": content_hash,
+                "bbox": str(node.bbox) if node.bbox else "",
+                "node_parent_id": node.parent_id if node.parent_id else "",
+                "image_path": node.image_path if node.image_path else "",
+                "vlm_description": node.metadata.get("vlm_description", ""),
+            })
             
             docs.append(Document(page_content=node.text, metadata=metadata))
         return docs
@@ -664,7 +660,7 @@ class RAGIntegration:
                 connection_args={"uri": self.milvus_uri},
             )
             child_store.add_documents(children)
-            
+
             parent_store = Milvus(
                 embedding_function=self.embeddings,
                 builtin_function=bm25,
@@ -675,8 +671,8 @@ class RAGIntegration:
             parent_store.add_documents(parents)
             return True
         except Exception as e:
-            print(f"Error storing in Milvus: {e}")
-            return False
+            logger.exception(f"Failed to store in Milvus: {e}")
+            raise
 
 
 

@@ -84,9 +84,9 @@ async def _stream_response(graph, query: str, session_id: str) -> AsyncGenerator
         yield json.dumps({"type": "citations", "data": final_citations})
 
         title_hint = query[:50] + ("…" if len(query) > 50 else "")
-        session = get_session(session_id)
+        session = await get_session(session_id)
         if session and not session.get("title"):
-            update_session(session_id, title=title_hint)
+            await update_session(session_id, title=title_hint)
 
         yield json.dumps({"type": "done", "data": None})
 
@@ -99,8 +99,8 @@ async def _stream_response(graph, query: str, session_id: str) -> AsyncGenerator
 async def chat(req: ChatRequest):
     session_id = req.session_id or str(uuid.uuid4())
 
-    if not get_session(session_id):
-        create_session(session_id)
+    if not await get_session(session_id):
+        await create_session(session_id)
 
     graph = _build_graph()
 

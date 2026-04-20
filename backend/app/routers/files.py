@@ -11,7 +11,7 @@ import aiofiles
 
 from config import Config
 from app.dependencies import get_pdf_parser, get_rag_integration, get_retriever
-from app.store import add_file, list_files, get_file, delete_file_record, get_file_by_hash
+from app.store import add_file, list_files, delete_file_record
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -36,9 +36,13 @@ async def upload_files(files: list[UploadFile] = File(...)):
             continue
 
         content_hash = hashlib.sha256(content).hexdigest()
-        existing = get_file_by_hash(content_hash)
-        if existing:
-            results.append({"filename": f.filename, "status": "duplicate", "detail": f"Same content as '{existing['filename']}'"})
+
+        # Dedup via Milvus metadata
+        retriever = get_retriever()
+        updater = retriever.get_updater()
+        existing_paper = updater.has_content_hash(content_hash)
+        if existing_paper:
+            results.append({"filename": f.filename, "status": "duplicate", "detail": f"Same content as paper '{existing_paper}'"})
             continue
 
         file_id = str(uuid.uuid4())
@@ -53,15 +57,16 @@ async def upload_files(files: list[UploadFile] = File(...)):
             nodes = parser.parse(str(save_path), paper_id)
 
             integration = get_rag_integration()
-            docs = integration.nodes_to_documents(nodes)
+            docs = integration.nodes_to_documents(nodes, content_hash=content_hash)
             parents, children = integration.create_chunks(docs)
-            integration.store_in_milvus(parents, children)
 
-            record = add_file(
+            updater.parent_store.add_documents(parents)
+            updater.child_store.add_documents(children)
+
+            record = await add_file(
                 file_id=file_id,
                 filename=f.filename,
                 paper_id=paper_id,
-                content_hash=content_hash,
                 size_bytes=len(content),
                 page_count=max((n.page_num for n in nodes), default=0),
                 chunk_count=len(children),
@@ -77,12 +82,12 @@ async def upload_files(files: list[UploadFile] = File(...)):
 
 @router.get("")
 async def get_files():
-    return list_files()
+    return await list_files()
 
 
 @router.delete("/{file_id}")
 async def remove_file(file_id: str):
-    record = delete_file_record(file_id)
+    record = await delete_file_record(file_id)
     if not record:
         raise HTTPException(status_code=404, detail="File not found")
 
